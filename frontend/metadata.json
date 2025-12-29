@@ -1,0 +1,5 @@
+{
+  "name": "QA Testing App",
+  "description": "A minimalist, monochromatic QA testing application inspired by Apple design principles. Features session recording configuration, active session monitoring with simulated browser control and activity feed, and session replay capabilities.",
+  "requestFramePermissions": []
+}
