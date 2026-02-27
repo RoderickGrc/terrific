@@ -9,6 +9,7 @@ import { ScreenRecorder } from '../services/screenRecorder.js';
 import { StorageService } from '../services/storage.js';
 import { WorkspaceRegistry } from '../services/workspaceRegistry.js';
 import { generateQaReport } from '../services/qaReport.js';
+import { ContextService } from '../services/contextService.js';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import multer from 'multer';
@@ -23,10 +24,12 @@ export class SessionController {
   private screenRecorders: Map<string, ScreenRecorder> = new Map();
   private storageService: StorageService;
   private workspaceRegistry: WorkspaceRegistry;
+  private contextService: ContextService;
   private eventEmitter: ((sessionId: string, event: any) => void) | null = null;
   constructor() {
     this.storageService = new StorageService();
     this.workspaceRegistry = WorkspaceRegistry.getInstance();
+    this.contextService = new ContextService();
   }
 
   /**
@@ -791,6 +794,19 @@ export class SessionController {
       // Save session using context's sessionsDir
       const sessionDirName = await this.storageService.saveSession(session, ctx.sessionsDir);
 
+      let contextFilePath: string | undefined;
+      let contextFilename: string | undefined;
+      try {
+        const savedContext = await this.contextService.saveContextFile(session, {
+          sessionsDir: ctx.sessionsDir,
+          sessionDirName,
+        });
+        contextFilePath = savedContext.contextFilePath;
+        contextFilename = savedContext.filename;
+      } catch (contextError) {
+        console.error('[Stop Session] Failed to generate canonical context file:', contextError);
+      }
+
       // Build redirect URL with workspace context if available
       // Use session.id (UUID) for cleaner URLs instead of sessionDirName
       const redirectTo = ctx.workspaceHash
@@ -819,7 +835,7 @@ export class SessionController {
       this.sessions.delete(id);
       this.recorders.delete(id);
 
-      res.json({ message: 'Session stopped and saved', sessionId: id, sessionDirName });
+      res.json({ message: 'Session stopped and saved', sessionId: id, sessionDirName, contextFilePath, contextFilename });
     } catch (error) {
       console.error('Error stopping session:', error);
       res.status(500).json({ error: 'Failed to stop session', details: String(error) });
@@ -1392,6 +1408,7 @@ export class SessionController {
 
     try {
       const { id } = req.params;
+      this.configureStorageForRequest(req);
       // #region agent log
       await fs.appendFile(join(process.cwd(), '.cursor', 'debug.log'), JSON.stringify({location:'session.ts:1201',message:'exportSessionContext called',data:{sessionId:id,eventIdsParam:req.query.eventIds,filtersParam:req.query.filters},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})+'\n');
       // #endregion
@@ -1404,88 +1421,38 @@ export class SessionController {
       await fs.appendFile(join(process.cwd(), '.cursor', 'debug.log'), JSON.stringify({location:'session.ts:1203',message:'session loaded',data:{sessionId:session.id,eventsCount:session.events.length,firstFewEventIds:session.events.slice(0,5).map(e=>e.id)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})+'\n');
       // #endregion
 
-      // Get event IDs from query params (new approach: exact event IDs instead of type filters)
       const eventIdsParam = req.query.eventIds as string | undefined;
       const filtersParam = req.query.filters as string | undefined; // Keep for backward compatibility
-      let eventsToExport = session.events;
-      let filterInfo = 'All events';
+      const contextResult = this.contextService.renderContext(session, {
+        eventIds: eventIdsParam ? eventIdsParam.split(',') : undefined,
+        legacyFilters: filtersParam ? filtersParam.split(',') : undefined,
+      });
 
       if (eventIdsParam) {
-        // New approach: filter by exact event IDs
-        const eventIds = new Set(eventIdsParam.split(',').map(id => id.trim()));
-        // #region agent log
-        await fs.appendFile(join(process.cwd(), '.cursor', 'debug.log'), JSON.stringify({location:'session.ts:1220',message:'filtering by eventIds',data:{eventIdsParamLength:eventIdsParam.length,eventIdsSetSize:eventIds.size,requestedIdsCount:eventIds.size,firstFewRequestedIds:Array.from(eventIds).slice(0,10),totalSessionEvents:session.events.length,availableEventIds:session.events.slice(0,10).map(e=>e.id)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'D'})+'\n');
-        // #endregion
-        eventsToExport = session.events.filter(event => eventIds.has(event.id));
-        const missingIds = Array.from(eventIds).filter(id => !session.events.some(e => e.id === id));
-        // #region agent log
-        await fs.appendFile(join(process.cwd(), '.cursor', 'debug.log'), JSON.stringify({location:'session.ts:1226',message:'events filtered by IDs result',data:{eventsToExportCount:eventsToExport.length,requestedCount:eventIds.size,missingIdsCount:missingIds.length,firstFewMissingIds:missingIds.slice(0,5),firstFewMatchedIds:eventsToExport.slice(0,5).map(e=>e.id),sampleEventTypes:eventsToExport.slice(0,10).map(e=>e.type)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'D'})+'\n');
-        // #endregion
-        filterInfo = `Filtered by event IDs: ${eventsToExport.length} events${missingIds.length > 0 ? ` (${missingIds.length} requested IDs not found)` : ''}`;
-      } else if (filtersParam) {
-        // Legacy approach: filter by event types (for backward compatibility)
-        const activeFilters = filtersParam.split(',').map(f => f.trim());
-        eventsToExport = session.events.filter(event => activeFilters.includes(event.type));
-        filterInfo = `Filtered by: ${activeFilters.join(', ')}`;
+        const requestedIds = eventIdsParam.split(',').map((eventId) => eventId.trim()).filter(Boolean);
+        const requestedIdSet = new Set(requestedIds);
+        const missingIds = requestedIds.filter((eventId) => !session.events.some((event) => event.id === eventId));
+        await fs.appendFile(join(process.cwd(), '.cursor', 'debug.log'), JSON.stringify({location:'session.ts:1226',message:'events filtered by IDs result',data:{eventsToExportCount:contextResult.eventsToExport.length,requestedCount:requestedIdSet.size,missingIdsCount:missingIds.length,firstFewMissingIds:missingIds.slice(0,5),firstFewMatchedIds:contextResult.eventsToExport.slice(0,5).map(e=>e.id),sampleEventTypes:contextResult.eventsToExport.slice(0,10).map(e=>e.type)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'D'})+'\n');
       }
 
-      const { optimizeEventsForLLM } = await import('../services/eventOptimizer.js');
-      const optimizedEvents = optimizeEventsForLLM(eventsToExport, session.startTime);
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const normalizedName = (session.name || 'session')
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
-
-      const filename = `${timestamp}-${normalizedName}-context.txt`;
-
-      const content = [
-        "=== CONTEXT ===",
-        `ID: ${session.id}`,
-        `Name: ${session.name || 'N/A'}`,
-        `Status: ${session.status}`,
-        `Date: ${session.createdAt || new Date(session.startTime).toISOString()}`,
-        `Initial URL: ${session.config?.initialUrl || 'N/A'}`,
-        `Resolution: ${session.config?.resolution || 'N/A'}`,
-        `Features: Actions:${session.config?.recordActions}, Console:${session.config?.recordConsole}, Network:${session.config?.recordNetwork}, Video:${session.config?.recordVideo}`,
-        `Filters: ${filterInfo}`,
-        `Events exported: ${eventsToExport.length} of ${session.events.length}`,
-        "",
-        "=== EVENT LOG ===",
-        optimizedEvents || "No events recorded.",
-        "",
-        "=== END OF EXPORT ==="
-      ].join('\n');
-
-      // Save a copy to the session directory
       try {
-        // Extract UUID from id parameter (it might be full directory name or just UUID)
-        const parts = id.split('_');
-        const sessionUuid = parts.length > 1 ? parts[parts.length - 1] : id;
-        const createdAt = session.createdAt || new Date(session.startTime).toISOString();
-        const sessionDirName = getSessionDirName(sessionUuid, createdAt);
-        const sessionDir = join(this.getSessionsDir(req), sessionDirName);
+        const sessionDirName = session.sessionDirName || getSessionDirName(session.id, session.createdAt || new Date(session.startTime).toISOString());
+        const savedContext = await this.contextService.saveContextFile(session, {
+          sessionsDir: this.getSessionsDir(req),
+          sessionDirName,
+          eventIds: eventIdsParam ? eventIdsParam.split(',') : undefined,
+          legacyFilters: filtersParam ? filtersParam.split(',') : undefined,
+        });
 
-        // Ensure directory exists
-        await fs.mkdir(sessionDir, { recursive: true });
-
-        // Write the context file to the session directory
-        const contextFilePath = join(sessionDir, filename);
-        await fs.writeFile(contextFilePath, content, 'utf-8');
-
-        console.log(`[Export Context] Saved context to: ${contextFilePath}`);
+        console.log(`[Export Context] Saved context to: ${savedContext.contextFilePath}`);
       } catch (saveError) {
         // Log error but don't fail the export - user still gets the download
         console.error('[Export Context] Failed to save context copy to session directory:', saveError);
       }
 
       res.setHeader('Content-Type', 'text/plain');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send(content);
+      res.setHeader('Content-Disposition', `attachment; filename="${contextResult.filename}"`);
+      res.send(contextResult.content);
     } catch (error) {
       console.error('Error exporting session context:', error);
       res.status(500).json({ error: 'Failed to export session context' });

@@ -7,11 +7,9 @@
 import { z } from 'zod';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { promises as fs } from 'fs';
 import { join } from 'path';
 import { logger } from '../utils/logger.js';
 import { config, getSessionDirName } from '../../config.js';
-import { optimizeEventsForLLM } from '../../services/eventOptimizer.js';
 import type { QAEvent } from '../../types/index.js';
 
 const execAsync = promisify(exec);
@@ -63,16 +61,16 @@ const WORKSPACE_API = `${BACKEND_URL}/api/workspaces`;
 // Falls back to current process working directory if not provided
 const CLIENT_CWD = process.env.CLIENT_CWD || process.cwd();
 
-// Cache for workspace hash to avoid repeated API calls
-let cachedWorkspaceHash: string | null = null;
+// Cache workspace to avoid repeated API calls
+let cachedWorkspace: { id: string; sessionsDir: string } | null = null;
 
 /**
  * Get or create workspace for the current CLIENT_CWD
  */
 async function getOrCreateWorkspace(): Promise<{ id: string; sessionsDir: string }> {
   // Return cached workspace if available
-  if (cachedWorkspaceHash) {
-    return { id: cachedWorkspaceHash, sessionsDir: '' };
+  if (cachedWorkspace) {
+    return cachedWorkspace;
   }
 
   const response = await fetch(WORKSPACE_API, {
@@ -87,10 +85,9 @@ async function getOrCreateWorkspace(): Promise<{ id: string; sessionsDir: string
 
   const workspace = await response.json() as { id: string; path: string; sessionsDir: string };
 
-  // Cache the workspace hash for subsequent calls
-  cachedWorkspaceHash = workspace.id;
+  cachedWorkspace = { id: workspace.id, sessionsDir: workspace.sessionsDir };
 
-  return { id: workspace.id, sessionsDir: workspace.sessionsDir };
+  return cachedWorkspace;
 }
 
 // Helper to get headers with X-Workspace-Hash for passing workspace context to backend
@@ -123,6 +120,8 @@ interface SessionResponse {
   events?: QAEvent[];
   sessionDirName?: string;
   message?: string; // Added for stopSession response
+  contextFilePath?: string;
+  contextFilename?: string;
 }
 
 // ============================================================================
@@ -293,8 +292,8 @@ Returns session information including:
 /**
  * get_session_logs
  *
- * Generates an optimized _context.md file from session events.
- * Uses optimizeEventsForLLM to create LLM-friendly context.
+ * Generates canonical context file from session events.
+ * Uses backend export-context endpoint for exact parity with UI export.
  */
 export const getSessionLogsTool = {
   name: 'get_session_logs',
@@ -550,32 +549,16 @@ export async function handleStopSession(args: unknown): Promise<string> {
     }
 
     // Construct full session path
-    const baseDir = sessionsDir || `${process.cwd()}/.terrific/sessions`;
+    const baseDir = sessionsDir || config.sessionsDir;
     const dirName = result.sessionDirName || sessionId;
     const sessionPath = join(baseDir, dirName);
-
-    // Automatically generate _context.md for the AI to review
-    let contextGenerated = false;
-    let contextPath = '';
-    try {
-      const events = session.events || [];
-      const sessionStart = session.startTime || Date.now();
-      const optimizedContent = optimizeEventsForLLM(events, sessionStart);
-      contextPath = join(sessionPath, '_context.md');
-      await fs.writeFile(contextPath, optimizedContent, 'utf-8');
-      contextGenerated = true;
-      logger.info('Generated _context.md for session', { sessionId, contextPath });
-    } catch (contextError) {
-      logger.error('Failed to generate _context.md', contextError);
-      // Don't fail the entire operation if context generation fails
-    }
 
     return JSON.stringify({
       message: result.message || 'Session stopped and saved',
       sessionId,
       sessionDirName: result.sessionDirName,
       sessionPath,
-      contextPath: contextGenerated ? contextPath : undefined,
+      contextPath: result.contextFilePath,
       workspaceHash,
       replayUrl: workspaceHash
         ? `http://localhost:4567/#/workspace/${workspaceHash}/replay/${sessionId}`
@@ -591,9 +574,9 @@ export async function handleStopSession(args: unknown): Promise<string> {
         startTime: session.startTime,
         createdAt: session.createdAt,
       },
-      note: contextGenerated 
-        ? `📝 An optimized _context.md file has been automatically generated at ${contextPath}. You should read this file to understand the session instead of reading events.json directly.`
-        : 'Note: Failed to generate _context.md automatically. Use get_session_logs tool to generate it.',
+      note: result.contextFilePath
+        ? `Context file generated automatically at ${result.contextFilePath}. Read this file instead of events.json.`
+        : 'Note: Context file generation failed automatically. Use get_session_logs to generate it.',
     }, null, 2);
   } catch (error) {
     logger.toolError('stop_session', error);
@@ -661,7 +644,7 @@ export async function handleGetSessionMetadata(args: unknown): Promise<string> {
 
 /**
  * Handler for get_session_logs
- * Generates _context.md using optimizeEventsForLLM
+ * Uses export-context endpoint to guarantee canonical output
  */
 export async function handleGetSessionLogs(args: unknown): Promise<string> {
   const schema = z.object({
@@ -677,27 +660,26 @@ export async function handleGetSessionLogs(args: unknown): Promise<string> {
   logger.toolCall('get_session_logs', { sessionId, eventIds, filter, search });
 
   try {
-    // Get workspace context to search in the correct sessions directory
+    // Get workspace context for correct session resolution
     const workspaceResult = await getOrCreateWorkspace();
     const { id: workspaceHash, sessionsDir } = workspaceResult;
 
-    const url = `${BACKEND_URL}/api/sessions/${sessionId}`;
+    const sessionUrl = `${BACKEND_URL}/api/sessions/${sessionId}`;
 
-    const response = await fetch(url, {
+    const sessionResponse = await fetch(sessionUrl, {
       headers: getHeaders(workspaceHash),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to get session: ${response.status} ${errorText}`);
+    if (!sessionResponse.ok) {
+      const errorText = await sessionResponse.text();
+      throw new Error(`Failed to get session: ${sessionResponse.status} ${errorText}`);
     }
 
-    const session = await response.json() as SessionResponse;
+    const session = await sessionResponse.json() as SessionResponse;
 
-    // Filter events
+    // Build filter set. Default behavior is no filters (all events).
     let filteredEvents = session.events || [];
 
-    // Priority 1: Filter by exact event IDs
     if (eventIds) {
       const eventIdSet = new Set(eventIds.split(',').map(id => id.trim()));
       filteredEvents = filteredEvents.filter((e: QAEvent) => eventIdSet.has(e.id));
@@ -720,43 +702,36 @@ export async function handleGetSessionLogs(args: unknown): Promise<string> {
       );
     }
 
-    // Generate optimized context using optimizeEventsForLLM
-    const sessionStart = session.startTime || Date.now();
-    const optimizedContent = optimizeEventsForLLM(filteredEvents, sessionStart);
+    const query = new URLSearchParams();
+    if (filteredEvents.length !== (session.events || []).length) {
+      query.set('eventIds', filteredEvents.map((event) => event.id).join(','));
+    }
 
-    // Build markdown content with session metadata
-    const contextMd = `# Session Context: ${session.name || sessionId}
+    const exportUrl = `${BACKEND_URL}/api/sessions/${sessionId}/export-context${query.size > 0 ? `?${query.toString()}` : ''}`;
+    const exportResponse = await fetch(exportUrl, {
+      headers: getHeaders(workspaceHash),
+    });
 
-**Session ID:** ${session.id}
-**Status:** ${session.status}
-**Created:** ${session.createdAt}
-**Total Events:** ${session.events?.length || 0}
-**Filtered Events:** ${filteredEvents.length}
+    if (!exportResponse.ok) {
+      const errorText = await exportResponse.text();
+      throw new Error(`Failed to export context: ${exportResponse.status} ${errorText}`);
+    }
 
----
-
-## Optimized Events
-
-${optimizedContent}
-`;
-
-    // Save to .terrific/sessions/{sessionDir}/_context.md
-    // Use workspace sessionsDir instead of default config.sessionsDir
+    const contentDisposition = exportResponse.headers.get('content-disposition') || '';
+    const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+    const contextFilename = filenameMatch?.[1] || 'context.txt';
     const sessionDirName = session.sessionDirName || getSessionDirName(sessionId, session.createdAt);
     const baseDir = sessionsDir || config.sessionsDir;
-    const sessionDir = join(baseDir, sessionDirName);
-    const contextPath = join(sessionDir, '_context.md');
+    const contextPath = join(baseDir, sessionDirName, contextFilename);
 
-    // Ensure directory exists and save file
-    await fs.mkdir(sessionDir, { recursive: true });
-    await fs.writeFile(contextPath, contextMd, 'utf-8');
+    await exportResponse.text();
 
-    logger.info('_context.md generated', { sessionId, contextPath, eventCount: filteredEvents.length });
+    logger.info('Canonical context generated', { sessionId, contextPath, eventCount: filteredEvents.length });
 
     logger.toolSuccess('get_session_logs');
 
     return JSON.stringify({
-      message: 'Optimized context generated successfully',
+      message: 'Context generated successfully',
       sessionId,
       name: session.name,
       eventIds: eventIds || 'none',
@@ -768,10 +743,10 @@ ${optimizedContent}
       contextFilePath: contextPath,
       modelInstructions: [
         `Read the context file at ${contextPath}. Do not read events.json.`,
-        'filter/includeTypes are include-only. For "without NETWORK", include CONSOLE/ACTION/SERVER_LOG/NOTE instead.',
+        'Default behavior uses all events and relies on optimizer.',
       ],
       instructions: [
-        `Optimized context saved to: ${contextPath}`,
+        `Context saved to: ${contextPath}`,
         'Use your file reading tool to retrieve the content.',
       ],
     }, null, 2);

@@ -5,6 +5,8 @@ import {
     sanitizeSensitiveData,
     simplifyTimestamp,
     pruneNetworkHeaders,
+    collapseViteReloadNoise,
+    deduplicateNetworkEvents,
     optimizeEventsForLLM,
     OPTIMIZER_CONFIG
 } from './eventOptimizer.js';
@@ -20,7 +22,8 @@ describe('eventOptimizer', () => {
                     message: 'input on INPUT#email',
                     timestamp: '2025-12-22T23:59:28.266Z',
                     details: JSON.stringify({
-                        type: 'input',
+                        action: 'input',
+                        selector: '#email',
                         tagName: 'INPUT',
                         id: 'email',
                         className: 'form-input',
@@ -33,7 +36,8 @@ describe('eventOptimizer', () => {
                     message: 'input on INPUT#email',
                     timestamp: '2025-12-22T23:59:28.472Z',
                     details: JSON.stringify({
-                        type: 'input',
+                        action: 'input',
+                        selector: '#email',
                         tagName: 'INPUT',
                         id: 'email',
                         className: 'form-input',
@@ -46,7 +50,8 @@ describe('eventOptimizer', () => {
                     message: 'input on INPUT#email',
                     timestamp: '2025-12-22T23:59:28.741Z',
                     details: JSON.stringify({
-                        type: 'input',
+                        action: 'input',
+                        selector: '#email',
                         tagName: 'INPUT',
                         id: 'email',
                         className: 'form-input',
@@ -71,7 +76,8 @@ describe('eventOptimizer', () => {
                     message: 'input on INPUT#email',
                     timestamp: '2025-12-22T23:59:28.266Z',
                     details: JSON.stringify({
-                        type: 'input',
+                        action: 'input',
+                        selector: '#email',
                         tagName: 'INPUT',
                         id: 'email',
                         className: 'form-input',
@@ -84,7 +90,8 @@ describe('eventOptimizer', () => {
                     message: 'input on INPUT#password',
                     timestamp: '2025-12-22T23:59:29.266Z',
                     details: JSON.stringify({
-                        type: 'input',
+                        action: 'input',
+                        selector: '#password',
                         tagName: 'INPUT',
                         id: 'password',
                         className: 'form-input',
@@ -330,6 +337,88 @@ describe('eventOptimizer', () => {
 
             // Restore original config
             Object.assign(OPTIMIZER_CONFIG, originalConfig);
+        });
+
+        it('should collapse vite dev reload burst into one summary event', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'n1',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/@vite/client',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({ status: 200, url: 'http://localhost:5173/@vite/client' })
+                },
+                {
+                    id: 'n2',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/@react-refresh',
+                    timestamp: '2026-01-01T10:00:00.050Z',
+                    details: JSON.stringify({ status: 200, url: 'http://localhost:5173/@react-refresh' })
+                },
+                {
+                    id: 'n3',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/src/main.tsx',
+                    timestamp: '2026-01-01T10:00:00.100Z',
+                    details: JSON.stringify({ status: 200, url: 'http://localhost:5173/src/main.tsx' })
+                }
+            ];
+
+            const collapsed = collapseViteReloadNoise(events);
+
+            expect(collapsed).toHaveLength(1);
+            expect(collapsed[0].message).toContain('Vite dev reload burst collapsed');
+        });
+
+        it('should preserve 4xx and 5xx network events', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'e1',
+                    type: EventType.NETWORK,
+                    message: '404 http://localhost:5173/src/missing.ts',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({ status: 404, url: 'http://localhost:5173/src/missing.ts' })
+                },
+                {
+                    id: 'e2',
+                    type: EventType.NETWORK,
+                    message: '500 http://localhost:5173/src/missing.ts',
+                    timestamp: '2026-01-01T10:00:00.100Z',
+                    details: JSON.stringify({ status: 500, url: 'http://localhost:5173/src/missing.ts' })
+                }
+            ];
+
+            const deduped = deduplicateNetworkEvents(events);
+            const collapsed = collapseViteReloadNoise(deduped);
+
+            expect(collapsed).toHaveLength(2);
+            expect(collapsed[0].message).toContain('404');
+            expect(collapsed[1].message).toContain('500');
+        });
+
+        it('should not collapse non-vite API events', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'a1',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/api/users',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({ status: 200, url: 'http://localhost:5173/api/users' })
+                },
+                {
+                    id: 'a2',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/api/projects',
+                    timestamp: '2026-01-01T10:00:00.050Z',
+                    details: JSON.stringify({ status: 200, url: 'http://localhost:5173/api/projects' })
+                }
+            ];
+
+            const collapsed = collapseViteReloadNoise(events);
+
+            expect(collapsed).toHaveLength(2);
+            expect(collapsed[0].id).toBe('a1');
+            expect(collapsed[1].id).toBe('a2');
         });
     });
 });

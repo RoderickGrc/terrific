@@ -14,7 +14,74 @@ export const OPTIMIZER_CONFIG = {
     enableTimestampSimplification: true,
     enableToonEncoding: true,
     enableNetworkDeduplication: true,
+    enableViteReloadCollapse: true,
 };
+
+interface NetworkMetadata {
+    status?: number;
+    url?: string;
+}
+
+function extractNetworkMetadata(event: QAEvent): NetworkMetadata {
+    if (event.type !== EventType.NETWORK) {
+        return {};
+    }
+
+    let status: number | undefined;
+    let url: string | undefined;
+
+    if (event.details) {
+        try {
+            const details = JSON.parse(event.details);
+            if (typeof details?.status === 'number') {
+                status = details.status;
+            }
+            if (typeof details?.url === 'string') {
+                url = details.url;
+            }
+        } catch {
+            // Ignore parse errors and continue with message-based fallback
+        }
+    }
+
+    const messageMatch = event.message.match(/^(\d{3})\s+(https?:\/\/\S+)/i);
+    if (messageMatch) {
+        if (status === undefined) {
+            status = Number(messageMatch[1]);
+        }
+        if (!url) {
+            url = messageMatch[2];
+        }
+    }
+
+    return { status, url };
+}
+
+function isErrorStatus(status?: number): boolean {
+    return typeof status === 'number' && status >= 400 && status <= 599;
+}
+
+function isViteReloadNoise(url?: string): boolean {
+    if (!url) {
+        return false;
+    }
+
+    try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.toLowerCase();
+        if (host !== 'localhost' && host !== '127.0.0.1') {
+            return false;
+        }
+
+        const path = parsed.pathname;
+        return path.startsWith('/@vite/client')
+            || path.startsWith('/@react-refresh')
+            || path.startsWith('/node_modules/.vite/')
+            || path.startsWith('/src/');
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Truncate long strings while keeping context from both ends.
@@ -146,6 +213,10 @@ export function optimizeEventsForLLM(
 
     if (OPTIMIZER_CONFIG.enableNetworkDeduplication) {
         processedEvents = deduplicateNetworkEvents(processedEvents);
+    }
+
+    if (OPTIMIZER_CONFIG.enableViteReloadCollapse) {
+        processedEvents = collapseViteReloadNoise(processedEvents);
     }
 
     if (OPTIMIZER_CONFIG.enableStaticResourceFiltering) {
@@ -405,6 +476,12 @@ export function deduplicateNetworkEvents(events: QAEvent[]): QAEvent[] {
 
     for (const event of events) {
         if (event.type === EventType.NETWORK) {
+            const { status } = extractNetworkMetadata(event);
+            if (isErrorStatus(status)) {
+                result.push(event);
+                continue;
+            }
+
             const currentTime = new Date(event.timestamp).getTime();
             const lastTime = recentRequests.get(event.message);
 
@@ -419,6 +496,68 @@ export function deduplicateNetworkEvents(events: QAEvent[]): QAEvent[] {
         result.push(event);
     }
 
+    return result;
+}
+
+export function collapseViteReloadNoise(events: QAEvent[]): QAEvent[] {
+    const result: QAEvent[] = [];
+    let burst: QAEvent[] = [];
+
+    const flushBurst = () => {
+        if (burst.length === 0) {
+            return;
+        }
+
+        if (burst.length === 1) {
+            result.push(burst[0]);
+            burst = [];
+            return;
+        }
+
+        const uniqueUrls = new Set<string>();
+        for (const event of burst) {
+            const { url } = extractNetworkMetadata(event);
+            if (url) {
+                uniqueUrls.add(url);
+            }
+        }
+
+        const summary: QAEvent = {
+            id: `vite-burst-${burst[0].id}`,
+            type: EventType.NETWORK,
+            timestamp: burst[0].timestamp,
+            message: `Vite dev reload burst collapsed (${burst.length} requests)`,
+            details: JSON.stringify({
+                summaryType: 'vite_reload_burst',
+                collapsedRequestCount: burst.length,
+                uniqueUrlCount: uniqueUrls.size,
+            }),
+        };
+
+        result.push(summary);
+        burst = [];
+    };
+
+    for (const event of events) {
+        if (event.type !== EventType.NETWORK) {
+            flushBurst();
+            result.push(event);
+            continue;
+        }
+
+        const { status, url } = extractNetworkMetadata(event);
+        const shouldCollapse = !isErrorStatus(status) && isViteReloadNoise(url);
+
+        if (shouldCollapse) {
+            burst.push(event);
+            continue;
+        }
+
+        flushBurst();
+        result.push(event);
+    }
+
+    flushBurst();
     return result;
 }
 
