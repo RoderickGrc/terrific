@@ -41,6 +41,15 @@ router.get('/:id/events/latest', (req, res) => {
   sessionController.getLatestEvents(req, res);
 });
 
+// Server info endpoint
+router.get('/server-info', (req, res) => {
+  if (!sessionController) {
+    res.status(500).json({ error: 'Session controller not initialized' });
+    return;
+  }
+  sessionController.getServerInfo(req, res);
+});
+
 router.get('/:id', (req, res) => {
   if (!sessionController) {
     res.status(500).json({ error: 'Session controller not initialized' });
@@ -140,21 +149,11 @@ router.delete('/:id', (req, res) => {
   sessionController.deleteSession(req, res);
 });
 router.get('/:id/export-context', (req, res) => {
-
   if (!sessionController) {
     res.status(500).json({ error: 'Session controller not initialized' });
     return;
   }
   sessionController.exportSessionContext(req, res);
-});
-
-// Server info endpoint
-router.get('/server-info', (req, res) => {
-  if (!sessionController) {
-    res.status(500).json({ error: 'Session controller not initialized' });
-    return;
-  }
-  sessionController.getServerInfo(req, res);
 });
 
 // Ingest endpoint for external server logs

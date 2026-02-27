@@ -17,6 +17,7 @@ interface ActivityFeedProps {
     activeEventId?: string | null;
     onEventsChange?: (updatedEvents: QAEvent[]) => void;
     sessionId?: string;
+    workspaceHash?: string | null;
 }
 
 const getEventIcon = (event: QAEvent) => {
@@ -52,7 +53,8 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
     activeEventId,
     onEventClick,
     onEventsChange,
-    sessionId
+    sessionId,
+    workspaceHash
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -345,8 +347,7 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                                                         const details = JSON.parse(event.details || '{}');
                                                         const filename = details.filename;
                                                         if (filename) {
-                                                            const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
-                                                            const imageUrl = buildSessionFileUrl(sessionId, filename);
+                                                            const imageUrl = buildSessionFileUrl(sessionId, filename, { workspaceHash: workspaceHash || undefined });
                                                             return (
                                                                 <div className="mt-2 border border-zinc-800 rounded overflow-hidden">
                                                                     <img src={imageUrl} alt="Screenshot Preview" className="w-full opacity-80" />

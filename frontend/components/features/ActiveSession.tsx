@@ -11,6 +11,7 @@ import { useWebSocket } from '../../src/hooks/useWebSocket';
 import { api } from '../../src/services/api';
 import { ScreenCaptureService } from '../../src/services/screenCapture';
 import { useWorkspace } from '../../WorkspaceContext';
+import { getHomePath, getReplayPath } from '../../src/services/workspacePaths';
 
 export const ActiveSession: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -158,9 +159,9 @@ export const ActiveSession: React.FC = () => {
           navigate(details.redirectTo);
         } else {
           // Fallback: construct URL with workspace context using session.id
-          const redirectPath = workspaceHash
-            ? `/workspace/${workspaceHash}/replay/${id}`
-            : `/replay/${id}`;
+          const redirectPath = id
+            ? getReplayPath(id, workspaceHash)
+            : getHomePath(workspaceHash);
           console.log('[ActiveSession] Session stopped, redirecting to:', redirectPath);
           navigate(redirectPath);
         }
@@ -240,9 +241,7 @@ export const ActiveSession: React.FC = () => {
       }
 
       // Construct workspace-aware replay URL using session.id
-      const replayPath = workspaceHash
-        ? `/workspace/${workspaceHash}/replay/${id}`
-        : `/replay/${id}`;
+      const replayPath = getReplayPath(id, workspaceHash);
       navigate(replayPath);
     } catch (error) {
       console.error('Error stopping session:', error);
@@ -259,7 +258,7 @@ export const ActiveSession: React.FC = () => {
         {/* Left: Navigation & Identity */}
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate(getHomePath(workspaceHash))}
             className="p-2 hover:bg-white/10 rounded-lg text-zinc-400 hover:text-white transition-colors"
             title="Cancel Session & Return Home"
           >

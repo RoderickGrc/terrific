@@ -8,6 +8,7 @@ import { api } from '../../src/services/api';
 import { generateQaReport } from '../../src/services/qaReport';
 import { useWorkspace } from '../../WorkspaceContext';
 import { buildSessionVideoUrl, buildSessionFileUrl } from '../../src/services/backendUrls';
+import { getHomePath } from '../../src/services/workspacePaths';
 
 import { ReplayHeader } from '../replay/ReplayHeader';
 import { ReplayViewer } from '../replay/ReplayViewer';
@@ -91,8 +92,8 @@ export const SessionReplay: React.FC = () => {
 
   const videoUrl = useMemo(() => {
     if (!hasVideo || !id) return null;
-    return buildSessionVideoUrl(id, { absolute: false });
-  }, [hasVideo, id, session?.videoFilename]);
+    return buildSessionVideoUrl(id, { absolute: false, workspaceHash: workspaceHash || undefined });
+  }, [hasVideo, id, workspaceHash, session?.videoFilename]);
 
   const duration = useMemo(() => {
     if (!session) return 0;
@@ -323,7 +324,10 @@ export const SessionReplay: React.FC = () => {
               const details = JSON.parse(s.details || '{}');
               const filename = details.filename;
               if (filename) {
-                return { url: buildSessionFileUrl(id, filename, { absolute: true }), timestamp: s.timestamp };
+                return {
+                  url: buildSessionFileUrl(id, filename, { absolute: true, workspaceHash: workspaceHash || undefined }),
+                  timestamp: s.timestamp
+                };
               }
             } catch (e) {
               console.error('Error parsing screenshot details:', e);
@@ -398,20 +402,20 @@ export const SessionReplay: React.FC = () => {
     if (!id || !window.confirm("Are you sure you want to delete this session?")) return;
     try {
       await api.deleteSession(id, workspaceHash);
-      navigate('/');
+      navigate(getHomePath(workspaceHash));
     } catch (error) {
       console.error('Failed to delete session:', error);
     }
   };
 
   if (isLoading) return <div className="h-screen bg-zinc-950 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div></div>;
-  if (error) return <div className="h-screen bg-zinc-950 flex flex-col items-center justify-center p-8"><h1 className="text-red-400 text-2xl font-bold mb-4">Error Loading Session</h1><p className="text-zinc-500 mb-8">{error}</p><Button onClick={() => navigate('/')}>Back Home</Button></div>;
+  if (error) return <div className="h-screen bg-zinc-950 flex flex-col items-center justify-center p-8"><h1 className="text-red-400 text-2xl font-bold mb-4">Error Loading Session</h1><p className="text-zinc-500 mb-8">{error}</p><Button onClick={() => navigate(getHomePath(workspaceHash))}>Back Home</Button></div>;
 
   return (
     <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100 overflow-hidden">
       <ReplayHeader
         session={session!}
-        onBack={() => navigate('/')}
+        onBack={() => navigate(getHomePath(workspaceHash))}
         onExportContext={handleExportContext}
         onDelete={handleDelete}
       />
@@ -468,6 +472,7 @@ export const SessionReplay: React.FC = () => {
             videoUrl={videoUrl}
             videoRef={videoRef}
             currentTime={currentTime}
+            workspaceHash={workspaceHash}
           />
           {(viewMode === 'video' || viewMode === 'screenshots') && (
             <>
@@ -494,6 +499,7 @@ export const SessionReplay: React.FC = () => {
               // No need to set index manually anymore, currentTime updates it
             } else setViewMode('video');
           }}
+          workspaceHash={workspaceHash}
         />
       </div>
     </div>

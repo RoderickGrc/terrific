@@ -75,6 +75,7 @@ interface ReplaySidebarProps {
   onEventsChange: (events: QAEvent[]) => void;
   onEventClick: (event: QAEvent) => void;
   sessionId?: string;
+  workspaceHash?: string | null;
 }
 
 export const ReplaySidebar: React.FC<ReplaySidebarProps> = ({
@@ -91,7 +92,8 @@ export const ReplaySidebar: React.FC<ReplaySidebarProps> = ({
   setShowHidden,
   onEventsChange,
   onEventClick,
-  sessionId
+  sessionId,
+  workspaceHash
 }) => {
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [newFilterProp, setNewFilterProp] = useState<FilterProperty>('type');
@@ -442,6 +444,7 @@ export const ReplaySidebar: React.FC<ReplaySidebarProps> = ({
         onEventsChange={onEventsChange}
         onEventClick={onEventClick}
         sessionId={sessionId}
+        workspaceHash={workspaceHash}
       />
     </div>
   );

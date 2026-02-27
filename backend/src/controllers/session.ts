@@ -18,6 +18,16 @@ import multer from 'multer';
 // Configure multer for memory storage (we'll save manually to session dir)
 const upload = multer({ storage: multer.memoryStorage() });
 
+class WorkspaceNotFoundError extends Error {
+  workspaceHash: string;
+
+  constructor(workspaceHash: string) {
+    super(`workspace not found: ${workspaceHash}`);
+    this.name = 'WorkspaceNotFoundError';
+    this.workspaceHash = workspaceHash;
+  }
+}
+
 export class SessionController {
   private sessions: Map<string, BrowserSession> = new Map();
   private recorders: Map<string, EventRecorder> = new Map();
@@ -37,14 +47,14 @@ export class SessionController {
    * Get workspace from request (from X-Workspace-Hash header or query param).
    * Returns null if no workspace is specified (uses default backend directory).
    */
+  private getWorkspaceHashFromRequest(req: Request): string | null {
+    const headerHash = req.headers['x-workspace-hash'] as string | undefined;
+    const queryHash = req.query.workspace as string | undefined;
+    return headerHash || queryHash || null;
+  }
+
   private getWorkspaceFromRequest(req: Request): { id: string; path: string } | null {
-    // Try header first (for API calls)
-    const workspaceHash = req.headers['x-workspace-hash'] as string;
-
-    // Fallback to query param (for direct URL access)
-    const queryHash = req.query.workspace as string;
-
-    const hash = workspaceHash || queryHash;
+    const hash = this.getWorkspaceHashFromRequest(req);
 
     if (!hash) {
       return null;
@@ -56,6 +66,18 @@ export class SessionController {
     }
 
     return { id: workspace.id, path: workspace.path };
+  }
+
+  private assertWorkspaceExistsForRequest(req: Request): void {
+    const hash = this.getWorkspaceHashFromRequest(req);
+    if (!hash) {
+      return;
+    }
+
+    const workspace = this.workspaceRegistry.getWorkspace(hash);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(hash);
+    }
   }
 
   /**
@@ -78,8 +100,22 @@ export class SessionController {
    * Must be called before any storage operations.
    */
   private configureStorageForRequest(req: Request): void {
+    this.assertWorkspaceExistsForRequest(req);
     const sessionsDir = this.getSessionsDir(req);
     this.storageService.setSessionsDir(sessionsDir);
+  }
+
+  private ensureStorageForRequest(req: Request, res: Response): boolean {
+    try {
+      this.configureStorageForRequest(req);
+      return true;
+    } catch (error) {
+      if (error instanceof WorkspaceNotFoundError) {
+        res.status(404).json({ error: 'workspace not found', workspaceHash: error.workspaceHash });
+        return false;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -115,8 +151,10 @@ export class SessionController {
 
   async createSession(req: Request, res: Response): Promise<void> {
     try {
-      // Configure storage directory based on client's CWD before creating session
-      this.configureStorageForRequest(req);
+      // Configure storage directory based on workspace before creating session
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
 
       // Get workspace from request to store in session
       const workspace = this.getWorkspaceFromRequest(req);
@@ -597,7 +635,9 @@ export class SessionController {
       const { id } = req.params;
 
       // Configure storage directory based on workspace before accessing storage
-      this.configureStorageForRequest(req);
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
 
       // First, check if session is active in memory
       const browserSession = this.sessions.get(id);
@@ -633,7 +673,9 @@ export class SessionController {
 
   async listSessions(req: Request, res: Response): Promise<void> {
     try {
-      this.configureStorageForRequest(req);
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
       const sessions = await this.storageService.listSessions();
       res.json(sessions);
     } catch (error) {
@@ -651,6 +693,10 @@ export class SessionController {
       const { id } = req.params;
       const offset = parseInt(req.query.offset as string) || 0;
       const limit = parseInt(req.query.limit as string) || 500;
+
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
 
       // First check active session in memory
       const browserSession = this.sessions.get(id);
@@ -706,6 +752,10 @@ export class SessionController {
     try {
       const { id } = req.params;
       const count = parseInt(req.query.count as string) || 100;
+
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
 
       // First check active session in memory
       const browserSession = this.sessions.get(id);
@@ -887,6 +937,11 @@ export class SessionController {
     try {
       const { id } = req.params;
       const { message, type, timestamp } = req.body;
+
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
+
       const browserSession = this.sessions.get(id);
       const recorder = this.recorders.get(id);
 
@@ -925,7 +980,6 @@ export class SessionController {
         }
 
         // Persist to storage (create session file if missing)
-        this.configureStorageForRequest(req);
         let session = await this.storageService.getSession(id);
         if (!session) {
           session = {
@@ -970,9 +1024,6 @@ export class SessionController {
         }
       }
 
-      // Configure storage to use client's working directory (if provided via X-Client-CWD header)
-      this.configureStorageForRequest(req);
-
       // Add to stored session file
       session.events.push(noteEvent);
       await this.storageService.saveSession(session);
@@ -988,6 +1039,10 @@ export class SessionController {
     try {
       const { id, noteId } = req.params;
       const { message } = req.body;
+
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
 
       // Handle active session
       const browserSession = this.sessions.get(id);
@@ -1011,8 +1066,6 @@ export class SessionController {
         return;
       }
 
-      this.configureStorageForRequest(req);
-
       session.events[eventIndex].message = message;
       await this.storageService.saveSession(session);
 
@@ -1026,6 +1079,10 @@ export class SessionController {
   async deleteNote(req: Request, res: Response): Promise<void> {
     try {
       const { id, noteId } = req.params;
+
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
 
       // Find the event to check if it's a screenshot
       let eventToDelete: QAEvent | undefined;
@@ -1068,8 +1125,6 @@ export class SessionController {
         }
       }
 
-      this.configureStorageForRequest(req);
-
       session.events = session.events.filter(e => e.id !== noteId);
       await this.storageService.saveSession(session);
 
@@ -1085,6 +1140,11 @@ export class SessionController {
     try {
       const { id } = req.params;
       const { imageData, timestamp } = req.body;
+
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
+
       const browserSession = this.sessions.get(id);
       const recorder = this.recorders.get(id);
 
@@ -1150,8 +1210,6 @@ export class SessionController {
           }
         }
 
-        this.configureStorageForRequest(req);
-
         // Add to the stored session file
         session.events.push(event);
         await this.storageService.saveSession(session);
@@ -1204,6 +1262,10 @@ export class SessionController {
       const event: QAEvent = req.body;
       const browserSession = this.sessions.get(id);
 
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
+
       // If active session, add to runtime events
       if (browserSession) {
         browserSession.events.push(event);
@@ -1213,8 +1275,6 @@ export class SessionController {
           this.eventEmitter(id, event);
         }
       }
-
-      this.configureStorageForRequest(req);
 
       // Always save to storage
       const session = await this.storageService.getSession(id);
@@ -1237,6 +1297,10 @@ export class SessionController {
       const { id } = req.params;
       const { name } = req.body;
 
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
+
       // Update in-memory session if it exists (active session)
       const browserSession = this.sessions.get(id);
       if (browserSession) {
@@ -1250,8 +1314,6 @@ export class SessionController {
         res.status(404).json({ error: 'Session not found' });
         return;
       }
-
-      this.configureStorageForRequest(req);
 
       session.name = name;
       await this.storageService.saveSession(session);
@@ -1268,6 +1330,10 @@ export class SessionController {
       const { id } = req.params;
       const { description } = req.body;
 
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
+
       // Try active session first
       const browserSession = this.sessions.get(id);
       if (browserSession) {
@@ -1283,8 +1349,6 @@ export class SessionController {
         res.status(404).json({ error: 'Session not found' });
         return;
       }
-
-      this.configureStorageForRequest(req);
 
       session.description = description;
       await this.storageService.saveSession(session);
@@ -1307,6 +1371,10 @@ export class SessionController {
     try {
       const { id } = req.params;
       const { filteredEvents, activeFilters, screenshots } = req.body;
+
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
 
       // Get session from storage
       const session = await this.storageService.getSession(id);
@@ -1342,7 +1410,9 @@ export class SessionController {
       const { id } = req.params;
 
       // Configure storage directory based on workspace before accessing storage
-      this.configureStorageForRequest(req);
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
 
       // Check if session exists
       const session = await this.storageService.getSession(id, false);
@@ -1413,7 +1483,9 @@ export class SessionController {
 
     try {
       const { id } = req.params;
-      this.configureStorageForRequest(req);
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
       // #region agent log
       fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dc2656'},body:JSON.stringify({sessionId:'dc2656',runId:'initial',hypothesisId:'A',location:'backend/src/controllers/session.ts:1412',message:'exportSessionContext started',data:{sessionId:id,workspacePresent:!!this.getWorkspaceFromRequest(req),workspaceId:this.getWorkspaceFromRequest(req)?.id || null,eventIdsParam:req.query.eventIds || null,filtersParam:req.query.filters || null},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
@@ -1482,6 +1554,10 @@ export class SessionController {
         return;
       }
 
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
+
       // Find target session
       let targetSessionId = sessionId;
 
@@ -1530,7 +1606,6 @@ export class SessionController {
       }
 
       // Also save to storage if session exists
-      this.configureStorageForRequest(req);
       const session = await this.storageService.getSession(targetSessionId);
       if (session) {
         session.events.push(event);
@@ -1585,6 +1660,10 @@ export class SessionController {
         const { id } = req.params;
         const file = (req as any).file;
 
+        if (!this.ensureStorageForRequest(req, res)) {
+          return;
+        }
+
         if (!file) {
           res.status(400).json({ error: 'No video file provided' });
           return;
@@ -1614,7 +1693,7 @@ export class SessionController {
 
         // Determine session directory
         const sessionDirName = getSessionDirName(sessionUuid, createdAt || new Date().toISOString());
-        const sessionDir = join(config.sessionsDir, sessionDirName);
+        const sessionDir = join(this.getSessionsDir(req), sessionDirName);
 
         // Ensure directory exists
         await fs.mkdir(sessionDir, { recursive: true });
@@ -1656,6 +1735,10 @@ export class SessionController {
       const { id } = req.params;
       const { filename } = req.body;
 
+      if (!this.ensureStorageForRequest(req, res)) {
+        return;
+      }
+
       if (!filename) {
         res.status(400).json({ error: 'Filename is required' });
         return;
@@ -1681,7 +1764,7 @@ export class SessionController {
       }
 
       const sessionDirName = getSessionDirName(sessionUuid, createdAt || new Date().toISOString());
-      const sessionDir = join(config.sessionsDir, sessionDirName);
+      const sessionDir = join(this.getSessionsDir(req), sessionDirName);
       const inputPath = join(sessionDir, filename);
       const tempPath = inputPath.replace('.webm', '-temp.webm');
 

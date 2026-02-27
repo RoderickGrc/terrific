@@ -9,6 +9,7 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { api } from '../../src/services/api';
 import { useWorkspace } from '../../WorkspaceContext';
+import { getSessionPath } from '../../src/services/workspacePaths';
 
 const DEBUG_GATEWAY_STORAGE_KEY = 'debug_gateway_enabled';
 
@@ -80,7 +81,7 @@ export const DebugServerPanel: React.FC = () => {
         recordNetwork: false,
         recordVideo: false,
       }, workspaceHash);
-      navigate(`/session/${session.id}`);
+      navigate(getSessionPath(session.id, workspaceHash));
     } catch (error) {
       console.error('Error starting debug session:', error);
       alert('Failed to start debug gateway session');

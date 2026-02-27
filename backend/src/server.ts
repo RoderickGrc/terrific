@@ -98,6 +98,16 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/credentials', (await import('./routes/credentials.js')).default);
 
 // Helper function to resolve sessions directory based on workspace hash
+class WorkspaceNotFoundError extends Error {
+  workspaceHash: string;
+
+  constructor(workspaceHash: string) {
+    super(`workspace not found: ${workspaceHash}`);
+    this.name = 'WorkspaceNotFoundError';
+    this.workspaceHash = workspaceHash;
+  }
+}
+
 async function getSessionsDirFromRequest(req: express.Request): Promise<string> {
   const workspaceHash = req.headers['x-workspace-hash'] as string || req.query.workspace as string;
   if (!workspaceHash) {
@@ -117,9 +127,8 @@ async function getSessionsDirFromRequest(req: express.Request): Promise<string> 
     return workspaceSessionsDir;
   }
 
-  // Workspace not found, fallback to default
-  console.log(`[File Request] Workspace ${workspaceHash} not found, using default sessions directory`);
-  return join(config.sessionsDir);
+  // Workspace not found and a hash was explicitly provided
+  throw new WorkspaceNotFoundError(workspaceHash);
 }
 
 // Helper function to find video file in session directory
@@ -154,7 +163,16 @@ app.get('/api/sessions/:id/files/:filename', async (req, res) => {
     }
 
     // Get the correct sessions directory based on workspace context
-    const sessionsDir = await getSessionsDirFromRequest(req);
+    let sessionsDir: string;
+    try {
+      sessionsDir = await getSessionsDirFromRequest(req);
+    } catch (error) {
+      if (error instanceof WorkspaceNotFoundError) {
+        res.status(404).json({ error: 'workspace not found', workspaceHash: error.workspaceHash });
+        return;
+      }
+      throw error;
+    }
 
     // Find session directory (supports both formats: UUID and DATE_TIME_UUID)
     let sessionDir: string | null = null;

@@ -3,6 +3,7 @@ import { Session } from '../../types';
 import { Card } from './Card';
 import { Badge } from './Badge';
 import { useWorkspace } from '../../WorkspaceContext';
+import { buildSessionFileUrl } from '../../src/services/backendUrls';
 
 interface SessionCardProps {
     session: Session;
@@ -47,8 +48,7 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session, onClick, onDe
 
     const getPreviewUrl = () => {
         if (session.previewImage) {
-            const sessionId = session.id;
-            return `/api/sessions/${sessionId}/files/${session.previewImage}`;
+            return buildSessionFileUrl(session.id, session.previewImage, { workspaceHash: workspaceHash || undefined });
         }
         return null;
     };

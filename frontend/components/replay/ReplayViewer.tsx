@@ -32,6 +32,7 @@ interface ReplayViewerProps {
     videoUrl?: string | null;
     videoRef?: React.RefObject<HTMLVideoElement>;
     currentTime: number;
+    workspaceHash?: string | null;
 }
 
 const STATUS_CONFIG: Record<DocStatus, { label: string, color: string, icon: any }> = {
@@ -60,7 +61,8 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
     onGenerateReport,
     videoUrl,
     videoRef,
-    currentTime
+    currentTime,
+    workspaceHash
 }) => {
     const [editingField, setEditingField] = useState<'title' | 'description' | null>(null);
     const [addingLinkType, setAddingLinkType] = useState<'notion' | 'github' | 'linear' | null>(null);
@@ -137,7 +139,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
                                                         const details = JSON.parse(screenshot.details || '{}');
                                                         const filename = details.filename;
                                                         if (filename) {
-                                                            return buildSessionFileUrl(sessionId, filename);
+                                                            return buildSessionFileUrl(sessionId, filename, { workspaceHash: workspaceHash || undefined });
                                                         }
                                                     } catch (e) {
                                                         console.error('Error parsing screenshot details:', e);
