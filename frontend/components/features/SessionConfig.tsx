@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, Clock, MoreHorizontal, Video, Edit2, Trash2 } from 'lucide-react';
-import { RESOLUTIONS, MOCK_PROFILES } from '../../src/constants';
-import { Resolution, Session } from '../../types';
+import { Play, Clock, Video, Home, Folder, Search, X } from 'lucide-react';
+import { RESOLUTIONS } from '../../src/constants';
+import { Resolution, Session, WorkspaceSummary } from '../../types';
 import { Button } from '../ui/Button';
 import { BrowserProfileManager } from './CredentialsManager';
 import { Badge } from '../ui/Badge';
@@ -12,6 +12,14 @@ import { api } from '../../src/services/api';
 import { useWorkspace } from '../../WorkspaceContext';
 import { buildSessionFileUrl } from '../../src/services/backendUrls';
 import type { BrowserProfile } from '../../types';
+
+interface WorkspaceOption {
+    id: string;
+    path: string;
+    displayName: string;
+    sessionCount: number;
+    isHome?: boolean;
+}
 
 export const SessionConfig: React.FC = () => {
     const navigate = useNavigate();
@@ -28,6 +36,10 @@ export const SessionConfig: React.FC = () => {
     const [isLoadingProfiles, setIsLoadingProfiles] = useState(true);
     const [displayedCount, setDisplayedCount] = useState(12); // Show 12 sessions initially
     const [hasMore, setHasMore] = useState(true);
+    const [showWorkspaceManager, setShowWorkspaceManager] = useState(false);
+    const [workspaceQuery, setWorkspaceQuery] = useState('');
+    const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceOption[]>([]);
+    const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(false);
     const observerTarget = useRef<HTMLDivElement>(null);
 
     // Recording mode state (browser will prompt user to choose screen)
@@ -100,6 +112,71 @@ export const SessionConfig: React.FC = () => {
         loadProfiles();
     }, [workspaceHash]);
 
+    useEffect(() => {
+        if (!showWorkspaceManager) return;
+
+        const loadWorkspaceOptions = async () => {
+            setIsLoadingWorkspaces(true);
+            try {
+                const [homeSessions, allWorkspaces] = await Promise.all([
+                    api.listSessions(),
+                    api.listWorkspaces(),
+                ]);
+
+                const sortedWorkspaces = [...allWorkspaces].sort(
+                    (a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime()
+                );
+
+                const workspaceCounts = await Promise.all(
+                    sortedWorkspaces.map(async (workspace: WorkspaceSummary) => {
+                        try {
+                            const sessions = await api.listSessions(workspace.id);
+                            return {
+                                id: workspace.id,
+                                path: workspace.path,
+                                displayName: getWorkspaceDisplayName(workspace.path),
+                                sessionCount: sessions.length,
+                            };
+                        } catch {
+                            return {
+                                id: workspace.id,
+                                path: workspace.path,
+                                displayName: getWorkspaceDisplayName(workspace.path),
+                                sessionCount: 0,
+                            };
+                        }
+                    })
+                );
+
+                setWorkspaceOptions([
+                    {
+                        id: 'home',
+                        path: 'Global context',
+                        displayName: 'Home',
+                        sessionCount: homeSessions.length,
+                        isHome: true,
+                    },
+                    ...workspaceCounts,
+                ]);
+            } catch (error) {
+                console.error('Failed to load workspaces:', error);
+                setWorkspaceOptions([
+                    {
+                        id: 'home',
+                        path: 'Global context',
+                        displayName: 'Home',
+                        sessionCount: 0,
+                        isHome: true,
+                    },
+                ]);
+            } finally {
+                setIsLoadingWorkspaces(false);
+            }
+        };
+
+        loadWorkspaceOptions();
+    }, [showWorkspaceManager]);
+
     const handleStart = async () => {
         if (!url) return;
         setIsCreating(true);
@@ -112,7 +189,10 @@ export const SessionConfig: React.FC = () => {
                 recordingMode,
                 ...config
             }, workspaceHash);
-            navigate(`/session/${newSession.id}`);
+            const sessionPath = workspaceHash
+                ? `/workspace/${workspaceHash}/session/${newSession.id}`
+                : `/session/${newSession.id}`;
+            navigate(sessionPath);
         } catch (err) {
             console.error("Failed to start session:", err);
             alert(err instanceof Error ? err.message : 'Failed to start session');
@@ -129,6 +209,22 @@ export const SessionConfig: React.FC = () => {
         }
     };
 
+    const filteredWorkspaceOptions = workspaceOptions.filter((option) => {
+        if (!workspaceQuery.trim()) return true;
+        const q = workspaceQuery.toLowerCase();
+        return option.displayName.toLowerCase().includes(q) || option.path.toLowerCase().includes(q);
+    });
+
+    const openWorkspace = (option: WorkspaceOption) => {
+        setShowWorkspaceManager(false);
+        setWorkspaceQuery('');
+        if (option.isHome) {
+            navigate('/');
+            return;
+        }
+        navigate(`/workspace/${option.id}`);
+    };
+
     return (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-12">
             {/* Hero / Config Section */}
@@ -136,9 +232,24 @@ export const SessionConfig: React.FC = () => {
 
                 {/* Left: Configuration */}
                 <div className="lg:col-span-7 space-y-8">
-                    <div>
-                        <h1 className="text-4xl font-bold tracking-tight text-white mb-2">New Session</h1>
-                        <p className="text-zinc-400 text-[15px]">Configure your flight recorder environment.</p>
+                    <div className="space-y-3">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start">
+                            <div>
+                                <h1 className="text-4xl font-bold tracking-tight text-white mb-2">New Session</h1>
+                                <p className="text-zinc-400 text-[15px]">Configure your flight recorder environment.</p>
+                            </div>
+
+                            <div className="self-start lg:hidden">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowWorkspaceManager(true)}
+                                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/60 px-3 py-2 text-[12px] font-medium text-zinc-300 transition-all hover:border-white/25 hover:text-zinc-100"
+                                >
+                                    <Folder size={13} />
+                                    Manage Workspaces
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="bg-zinc-900/50 backdrop-blur-sm border border-white/5 rounded-2xl p-6 md:p-8 shadow-sm space-y-8">
@@ -296,10 +407,16 @@ export const SessionConfig: React.FC = () => {
                 </div>
 
                 {/* Right: Info / Debug Server */}
-                <div className="hidden lg:block lg:col-span-5 space-y-8">
-                    <div className="invisible select-none" aria-hidden="true">
-                        <h1 className="text-4xl font-bold mb-2">Spacer</h1>
-                        <p className="text-[15px]">Spacer</p>
+                <div className="hidden lg:flex lg:flex-col lg:col-span-5 space-y-8">
+                    <div className="flex justify-end items-start min-h-[4.5rem]">
+                        <button
+                            type="button"
+                            onClick={() => setShowWorkspaceManager(true)}
+                            className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/60 px-3 py-2 text-[12px] font-medium text-zinc-300 transition-all hover:border-white/25 hover:text-zinc-100"
+                        >
+                            <Folder size={13} />
+                            Manage Workspaces
+                        </button>
                     </div>
 
                     <DebugServerPanel />
@@ -350,6 +467,20 @@ export const SessionConfig: React.FC = () => {
                     if (!url) setUrl(profile.startUrl);
                     setShowProfileManager(false);
                 }}
+            />
+
+            <WorkspaceManagerModal
+                isOpen={showWorkspaceManager}
+                isLoading={isLoadingWorkspaces}
+                query={workspaceQuery}
+                options={filteredWorkspaceOptions}
+                currentWorkspaceHash={workspaceHash}
+                onQueryChange={setWorkspaceQuery}
+                onClose={() => {
+                    setShowWorkspaceManager(false);
+                    setWorkspaceQuery('');
+                }}
+                onSelect={openWorkspace}
             />
         </div>
     );
@@ -436,3 +567,118 @@ function getTimeAgo(timestamp: number) {
     if (interval > 1) return Math.floor(interval) + " minutes ago";
     return Math.floor(seconds) + " seconds ago";
 }
+
+function getWorkspaceDisplayName(path: string): string {
+    const cleanPath = path.replace(/\\/g, '/');
+    const parts = cleanPath.split('/').filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (!last) return path;
+
+    if (last === '.terrific' && parts.length > 1) {
+        return parts[parts.length - 2];
+    }
+
+    return last;
+}
+
+interface WorkspaceManagerModalProps {
+    isOpen: boolean;
+    isLoading: boolean;
+    query: string;
+    options: WorkspaceOption[];
+    currentWorkspaceHash: string | null;
+    onQueryChange: (value: string) => void;
+    onClose: () => void;
+    onSelect: (option: WorkspaceOption) => void;
+}
+
+const WorkspaceManagerModal: React.FC<WorkspaceManagerModalProps> = ({
+    isOpen,
+    isLoading,
+    query,
+    options,
+    currentWorkspaceHash,
+    onQueryChange,
+    onClose,
+    onSelect,
+}) => {
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="w-full max-w-2xl bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl shadow-black overflow-hidden flex flex-col max-h-[88vh]">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-sky-500/10 rounded-lg border border-sky-500/20">
+                            <Folder className="w-5 h-5 text-sky-400" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-semibold text-zinc-100">Workspace Manager</h2>
+                            <p className="text-xs text-zinc-500">Switch between Home and any saved workspace.</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="text-zinc-500 hover:text-zinc-100 transition-colors">
+                        <X size={20} />
+                    </button>
+                </div>
+
+                <div className="p-4 border-b border-zinc-800">
+                    <div className="relative">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                        <input
+                            value={query}
+                            onChange={(e) => onQueryChange(e.target.value)}
+                            placeholder="Search by workspace name or path..."
+                            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/30"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                    {isLoading && (
+                        <div className="py-10 text-center text-zinc-500 text-sm">Loading workspaces...</div>
+                    )}
+
+                    {!isLoading && options.length === 0 && (
+                        <div className="py-10 text-center text-zinc-500 text-sm">No workspaces match your search.</div>
+                    )}
+
+                    {!isLoading && options.map((option) => {
+                        const isActive = option.isHome ? !currentWorkspaceHash : currentWorkspaceHash === option.id;
+
+                        return (
+                            <button
+                                key={option.id}
+                                onClick={() => onSelect(option)}
+                                className={`w-full text-left rounded-xl border p-3 transition-all ${isActive
+                                    ? 'border-emerald-400/40 bg-emerald-500/10'
+                                    : 'border-zinc-800 bg-zinc-950 hover:border-zinc-700'
+                                    }`}
+                            >
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-medium text-zinc-100 flex items-center gap-2">
+                                            {option.isHome ? <Home size={14} className="text-emerald-300" /> : <Folder size={14} className="text-sky-300" />}
+                                            <span className="truncate">{option.displayName}</span>
+                                        </p>
+                                        <p className="text-[11px] text-zinc-500 truncate mt-1">{option.path}</p>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <span className="rounded-md border border-white/10 bg-black/30 px-2 py-1 text-[11px] text-zinc-300">
+                                            {option.sessionCount} sessions
+                                        </span>
+                                        {isActive && (
+                                            <span className="rounded-md bg-emerald-400/20 px-2 py-1 text-[10px] uppercase tracking-wide text-emerald-200">
+                                                active
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+};

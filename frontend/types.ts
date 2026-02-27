@@ -67,6 +67,13 @@ export interface BrowserProfile {
   storageSize?: string; // e.g. "45 KB"
 }
 
+export interface WorkspaceSummary {
+  id: string;
+  path: string;
+  createdAt: string;
+  lastAccessedAt: string;
+}
+
 export interface Session {
   id: string;
   name?: string;

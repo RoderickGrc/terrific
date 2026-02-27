@@ -1,4 +1,4 @@
-import { SessionConfig, Session, QAEvent, EventType } from '../../types';
+import { SessionConfig, Session, QAEvent, EventType, WorkspaceSummary } from '../../types';
 import { API_BASE_URL } from './backendUrls';
 
 export const api = {
@@ -468,6 +468,12 @@ export const api = {
     if (!response.ok) throw new Error('Failed to get server info');
     return response.json();
   },
-};
 
+  async listWorkspaces(): Promise<WorkspaceSummary[]> {
+    const response = await fetch(`${API_BASE_URL}/api/workspaces`);
+    if (!response.ok) throw new Error('Failed to list workspaces');
+    const data = await response.json() as { workspaces?: WorkspaceSummary[] };
+    return data.workspaces || [];
+  },
+};
 
