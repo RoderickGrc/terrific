@@ -10,6 +10,7 @@ import { StorageService } from '../services/storage.js';
 import { WorkspaceRegistry } from '../services/workspaceRegistry.js';
 import { generateQaReport } from '../services/qaReport.js';
 import { ContextService } from '../services/contextService.js';
+import { applyFilterPolicyToEvents, resolveFilterPolicy } from '../services/filtersPolicy.js';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import multer from 'multer';
@@ -791,6 +792,10 @@ export class SessionController {
         events: browserSession.events,
       };
 
+      const resolvedFilters = resolveFilterPolicy(ctx.sessionsDir);
+      const postProcessResult = applyFilterPolicyToEvents(session.events, resolvedFilters.policy);
+      session.events = postProcessResult.events;
+
       // Save session using context's sessionsDir
       const sessionDirName = await this.storageService.saveSession(session, ctx.sessionsDir);
 
@@ -1426,6 +1431,7 @@ export class SessionController {
       const contextResult = this.contextService.renderContext(session, {
         eventIds: eventIdsParam ? eventIdsParam.split(',') : undefined,
         legacyFilters: filtersParam ? filtersParam.split(',') : undefined,
+        sessionsDir: this.getSessionsDir(req),
       });
 
       // #region agent log

@@ -20,6 +20,7 @@ export const config = {
   credentialsFile: join(terrificHome, 'credentials.json'),
   workspacesFile: join(terrificHome, 'workspaces.json'),
   globalConfigFile: join(terrificHome, 'config.json'),
+  globalFiltersFile: join(terrificHome, 'filters.yaml'),
   terrificHome,
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:4567',
 };
