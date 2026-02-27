@@ -19,7 +19,7 @@
 
 ### ✨ Key Features
 
-- 🎥 **Complete Session Recording**: Captures video, user actions, console logs, and network traffic
+- 🎥 **Complete Session Recording**: Captures video, user actions, console logs, and network traffic, with both browser-window and full-screen recording modes
 - 🔄 **Real-Time Updates**: WebSocket for live event streaming
 - 🧠 **Intelligent LLM Analysis**: Automatic context generation and bug reports
 - 🎯 **Smart Crawling**: Automatic DOM capture with SmartDiff for token optimization
@@ -29,6 +29,7 @@
 - 📝 **Notes and Flags**: Add annotations and markers during tests
 - 🌓 **Dark Mode**: Minimalist Apple-inspired interface with dark mode support
 - 💾 **Context Export**: Generate optimized context for LLMs with applied filters
+- 🌐 **Workspaces and MCP integration**: Workspace-aware storage plus an MCP server for AI assistants (Cursor and other MCP clients)
 
 ---
 
@@ -52,9 +53,8 @@ terrific-qa/
 │   │   └── utils/        # Utilities
 │   └── dist/             # Compiled build
 │
-├── sessions/             # Saved session data (JSON + videos)
-├── credentials.json      # Saved browser profiles
-└── docs/                 # Documentation and specifications
+├── docs/                 # Documentation and specifications
+└── (runtime data)        # Sessions, workspaces, credentials stored under user home in .terrific/
 ```
 
 ---
@@ -105,6 +105,12 @@ npm run dev
 
 Backend will be available at `http://localhost:3001`
 
+On Windows you can also start it from the repo root with:
+
+```powershell
+.\start-backend.cmd
+```
+
 #### 4️⃣ Install and Run Frontend
 
 In another terminal:
@@ -116,6 +122,12 @@ npm run dev
 ```
 
 Frontend will be available at `http://localhost:5173`
+
+On Windows you can also start it from the repo root with:
+
+```powershell
+.\start-frontend.cmd
+```
 
 ---
 
@@ -182,6 +194,11 @@ Generates an optimized context file that includes:
 - Crawls with SmartDiff applied
 - TOON format for maximum readability
 
+### Workspaces and MCP integration
+
+- Workspace-aware storage keeps sessions organized per project.
+- Expose Terrific as an MCP server so AI coding assistants (such as Cursor) can query sessions, logs, and context directly.
+
 ---
 
 ## 🛠️ Technology Stack
@@ -212,6 +229,7 @@ Generates an optimized context file that includes:
 
 - [Design Specifications](./docs/design-specifications.md) - Complete UI/UX guide
 - [Smart Autocrawl Plan](./docs/tasks/plan-autocrawl-inteligente.md) - Crawling system details
+- [Terrific MCP tutorial](./docs/mcp-tutorial.md) - Connect Terrific as an MCP server for Cursor
 
 ---
 
