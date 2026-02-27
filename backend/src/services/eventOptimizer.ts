@@ -18,8 +18,212 @@ export const OPTIMIZER_CONFIG = {
 };
 
 interface NetworkMetadata {
+    method?: string;
     status?: number;
     url?: string;
+}
+
+interface ParsedNetworkEvent {
+    method?: string;
+    status?: number;
+    url?: string;
+    requestBody?: unknown;
+    responseBody?: unknown;
+    kind: 'request' | 'response' | 'unknown';
+    matchKey?: string;
+    urlKey?: string;
+}
+
+interface CorrelatedNetworkResponse {
+    timestamp: string;
+    status?: number;
+    body?: unknown;
+}
+
+interface CorrelatedNetworkEvent {
+    optimizedKind: 'correlated_network';
+    id: string;
+    type: EventType.NETWORK;
+    timestamp: string;
+    message: string;
+    requestBody?: unknown;
+    response: CorrelatedNetworkResponse | null;
+}
+
+type OptimizerPipelineEvent = QAEvent | CorrelatedNetworkEvent;
+
+const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']);
+const REQUEST_LINE_REGEX = /^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(\S+)/i;
+const RESPONSE_LINE_REGEX = /^(\d{3})\s+(\S+)/;
+const VITE_NOISE_PATH_PREFIXES = [
+    '/@vite/client',
+    '/@react-refresh',
+    '/src/',
+    '/node_modules/.vite/',
+    '/@fs/',
+    '/@id/',
+    '/node_modules/vite/dist/client/',
+];
+const LOCAL_DEV_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
+const VOLATILE_MATCH_QUERY_PARAMS = new Set(['t', 'v']);
+const VITE_BURST_WINDOW_MS = 1500;
+
+function tryParseJson(value?: string): any {
+    if (!value) {
+        return undefined;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+        return undefined;
+    }
+
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        return undefined;
+    }
+}
+
+function parseStatus(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isInteger(value)) {
+        return value;
+    }
+
+    if (typeof value === 'string' && /^\d{3}$/.test(value.trim())) {
+        return Number(value.trim());
+    }
+
+    return undefined;
+}
+
+function parseMethod(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const upper = value.trim().toUpperCase();
+    if (!HTTP_METHODS.has(upper)) {
+        return undefined;
+    }
+
+    return upper;
+}
+
+function parseUrlFromUnknown(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseUrl(url: string): URL | null {
+    try {
+        return new URL(url, 'http://localhost');
+    } catch {
+        return null;
+    }
+}
+
+function normalizeUrlForMatching(url: string): string {
+    const parsed = parseUrl(url);
+    if (!parsed) {
+        return url.trim();
+    }
+
+    const normalizedParams: Array<[string, string]> = [];
+    for (const [key, value] of parsed.searchParams.entries()) {
+        if (VOLATILE_MATCH_QUERY_PARAMS.has(key.toLowerCase())) {
+            continue;
+        }
+        normalizedParams.push([key, value]);
+    }
+
+    normalizedParams.sort(([aKey, aVal], [bKey, bVal]) => {
+        if (aKey === bKey) {
+            return aVal.localeCompare(bVal);
+        }
+        return aKey.localeCompare(bKey);
+    });
+
+    const search = normalizedParams.length > 0
+        ? `?${normalizedParams.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&')}`
+        : '';
+    const normalizedPath = parsed.pathname || '/';
+    const isAbsolute = /^https?:\/\//i.test(url.trim());
+
+    if (isAbsolute) {
+        return `${parsed.protocol}//${parsed.host}${normalizedPath}${search}`;
+    }
+
+    return `${normalizedPath}${search}`;
+}
+
+function buildNetworkMatchKey(method?: string, url?: string): string | undefined {
+    if (!method || !url) {
+        return undefined;
+    }
+
+    return `${method} ${normalizeUrlForMatching(url)}`;
+}
+
+function parseNetworkEvent(event: QAEvent): ParsedNetworkEvent {
+    const details = tryParseJson(event.details);
+    const requestMatch = event.message.match(REQUEST_LINE_REGEX);
+    const responseMatch = event.message.match(RESPONSE_LINE_REGEX);
+
+    const methodFromMessage = parseMethod(requestMatch?.[1]);
+    const urlFromMessage = parseUrlFromUnknown(requestMatch?.[2] || responseMatch?.[2]);
+    const statusFromMessage = parseStatus(responseMatch?.[1]);
+
+    const methodFromDetails = parseMethod(details?.method);
+    const urlFromDetails = parseUrlFromUnknown(details?.url);
+    const statusFromDetails = parseStatus(details?.status);
+
+    const method = methodFromMessage || methodFromDetails;
+    const url = urlFromMessage || urlFromDetails;
+    const status = statusFromMessage ?? statusFromDetails;
+    const requestBody = details?.body;
+    const responseBody = details?.responseBody;
+
+    let kind: ParsedNetworkEvent['kind'] = 'unknown';
+    if (requestMatch) {
+        kind = 'request';
+    } else if (responseMatch) {
+        kind = 'response';
+    } else if (method && !status) {
+        kind = 'request';
+    } else if (status && !method) {
+        kind = 'response';
+    } else if (method && status) {
+        kind = 'response';
+    }
+
+    const urlKey = url ? normalizeUrlForMatching(url) : undefined;
+    const matchKey = buildNetworkMatchKey(method, url);
+
+    return {
+        method,
+        status,
+        url,
+        requestBody,
+        responseBody,
+        kind,
+        matchKey,
+        urlKey,
+    };
+}
+
+function buildNetworkMessage(parsed: ParsedNetworkEvent, fallback: string): string {
+    if (parsed.method && parsed.url) {
+        return `${parsed.method} ${parsed.url}`;
+    }
+    if (parsed.url) {
+        return `NET ${parsed.url}`;
+    }
+    return fallback;
 }
 
 function extractNetworkMetadata(event: QAEvent): NetworkMetadata {
@@ -27,34 +231,12 @@ function extractNetworkMetadata(event: QAEvent): NetworkMetadata {
         return {};
     }
 
-    let status: number | undefined;
-    let url: string | undefined;
-
-    if (event.details) {
-        try {
-            const details = JSON.parse(event.details);
-            if (typeof details?.status === 'number') {
-                status = details.status;
-            }
-            if (typeof details?.url === 'string') {
-                url = details.url;
-            }
-        } catch {
-            // Ignore parse errors and continue with message-based fallback
-        }
-    }
-
-    const messageMatch = event.message.match(/^(\d{3})\s+(https?:\/\/\S+)/i);
-    if (messageMatch) {
-        if (status === undefined) {
-            status = Number(messageMatch[1]);
-        }
-        if (!url) {
-            url = messageMatch[2];
-        }
-    }
-
-    return { status, url };
+    const parsed = parseNetworkEvent(event);
+    return {
+        method: parsed.method,
+        status: parsed.status,
+        url: parsed.url,
+    };
 }
 
 function isErrorStatus(status?: number): boolean {
@@ -66,21 +248,17 @@ function isViteReloadNoise(url?: string): boolean {
         return false;
     }
 
-    try {
-        const parsed = new URL(url);
-        const host = parsed.hostname.toLowerCase();
-        if (host !== 'localhost' && host !== '127.0.0.1') {
-            return false;
-        }
-
-        const path = parsed.pathname;
-        return path.startsWith('/@vite/client')
-            || path.startsWith('/@react-refresh')
-            || path.startsWith('/node_modules/.vite/')
-            || path.startsWith('/src/');
-    } catch {
+    const parsed = parseUrl(url);
+    if (!parsed) {
         return false;
     }
+
+    const host = parsed.hostname.toLowerCase();
+    if (!LOCAL_DEV_HOSTS.has(host)) {
+        return false;
+    }
+
+    return VITE_NOISE_PATH_PREFIXES.some((prefix) => parsed.pathname.startsWith(prefix));
 }
 
 /**
@@ -188,10 +366,162 @@ interface OptimizedEvent {
     type: string;    // Event type abbreviated
     msg: string;     // Clean message
     val?: string;    // Final value (for grouped inputs)
-    status?: number; // HTTP status (only for NETWORK)
     details?: any;   // Pruned details if relevant (parsed JSON for natural look)
     body?: any;      // Processed request body (for NETWORK POST/PUT/PATCH)
-    responseBody?: string; // Schema only (field names and types) for response bodies
+    response?: {
+        t: string;
+        status?: number;
+        body?: string;
+    } | null;
+}
+
+function summarizeResponseBody(body: unknown): string | undefined {
+    if (body === undefined || body === null) {
+        return undefined;
+    }
+
+    if (typeof body === 'string') {
+        return truncateWithContext(body, 50);
+    }
+
+    return extractSchemaOnly(body);
+}
+
+function isCorrelatedNetworkEvent(event: OptimizerPipelineEvent): event is CorrelatedNetworkEvent {
+    return (event as CorrelatedNetworkEvent).optimizedKind === 'correlated_network';
+}
+
+function correlateNetworkEvents(events: QAEvent[]): OptimizerPipelineEvent[] {
+    const parsedByIndex = new Map<number, ParsedNetworkEvent>();
+    const pendingRequestByKey = new Map<string, number[]>();
+    const requestToResponse = new Map<number, number>();
+    const matchedResponses = new Set<number>();
+
+    for (let index = 0; index < events.length; index += 1) {
+        const event = events[index];
+        if (event.type !== EventType.NETWORK) {
+            continue;
+        }
+
+        const parsed = parseNetworkEvent(event);
+        parsedByIndex.set(index, parsed);
+
+        if (parsed.kind === 'request') {
+            if (parsed.matchKey) {
+                const queue = pendingRequestByKey.get(parsed.matchKey) || [];
+                queue.push(index);
+                pendingRequestByKey.set(parsed.matchKey, queue);
+            }
+            continue;
+        }
+
+        if (parsed.kind !== 'response') {
+            continue;
+        }
+
+        let matchedRequestIndex: number | undefined;
+        if (parsed.matchKey) {
+            const queue = pendingRequestByKey.get(parsed.matchKey);
+            if (queue && queue.length > 0) {
+                matchedRequestIndex = queue.shift();
+            }
+        }
+
+        if (matchedRequestIndex === undefined && parsed.urlKey) {
+            let oldestKey: string | undefined;
+            let oldestRequestIndex: number | undefined;
+
+            for (const [key, queue] of pendingRequestByKey.entries()) {
+                if (queue.length === 0) {
+                    continue;
+                }
+
+                const firstIndex = queue[0];
+                const firstParsed = parsedByIndex.get(firstIndex);
+                if (!firstParsed || firstParsed.urlKey !== parsed.urlKey) {
+                    continue;
+                }
+
+                if (oldestRequestIndex === undefined || firstIndex < oldestRequestIndex) {
+                    oldestRequestIndex = firstIndex;
+                    oldestKey = key;
+                }
+            }
+
+            if (oldestKey !== undefined && oldestRequestIndex !== undefined) {
+                pendingRequestByKey.get(oldestKey)?.shift();
+                matchedRequestIndex = oldestRequestIndex;
+            }
+        }
+
+        if (matchedRequestIndex !== undefined) {
+            requestToResponse.set(matchedRequestIndex, index);
+            matchedResponses.add(index);
+        }
+    }
+
+    const output: OptimizerPipelineEvent[] = [];
+
+    for (let index = 0; index < events.length; index += 1) {
+        const event = events[index];
+        if (event.type !== EventType.NETWORK) {
+            output.push(event);
+            continue;
+        }
+
+        const parsed = parsedByIndex.get(index) || parseNetworkEvent(event);
+
+        if (parsed.kind === 'request') {
+            const responseIndex = requestToResponse.get(index);
+            const response = responseIndex !== undefined
+                ? events[responseIndex]
+                : undefined;
+            const parsedResponse = responseIndex !== undefined
+                ? (parsedByIndex.get(responseIndex) || parseNetworkEvent(response!))
+                : undefined;
+
+            output.push({
+                optimizedKind: 'correlated_network',
+                id: event.id,
+                type: EventType.NETWORK,
+                timestamp: event.timestamp,
+                message: buildNetworkMessage(parsed, event.message),
+                requestBody: parsed.requestBody,
+                response: response && parsedResponse
+                    ? {
+                        timestamp: response.timestamp,
+                        status: parsedResponse.status,
+                        body: parsedResponse.responseBody,
+                    }
+                    : null,
+            });
+            continue;
+        }
+
+        if (parsed.kind === 'response') {
+            if (matchedResponses.has(index)) {
+                continue;
+            }
+
+            output.push({
+                optimizedKind: 'correlated_network',
+                id: event.id,
+                type: EventType.NETWORK,
+                timestamp: event.timestamp,
+                message: buildNetworkMessage(parsed, event.message),
+                response: {
+                    timestamp: event.timestamp,
+                    status: parsed.status,
+                    body: parsed.responseBody,
+                },
+            });
+            continue;
+        }
+
+        output.push(event);
+    }
+
+    return output;
 }
 
 /**
@@ -223,20 +553,49 @@ export function optimizeEventsForLLM(
         processedEvents = filterStaticResources(processedEvents);
     }
 
+    if (OPTIMIZER_CONFIG.enableSensitiveDataSanitization) {
+        processedEvents = processedEvents.map((event) => sanitizeSensitiveData(event));
+    }
+
+    const pipelineEvents = correlateNetworkEvents(processedEvents);
+
     // Track previous crawl for sequential SmartDiff processing
     let previousCrawlContent: string | null = null;
 
     // Map to optimized format
-    const optimized: OptimizedEvent[] = processedEvents.map((event) => {
-        let evt = event;
-
-        if (OPTIMIZER_CONFIG.enableSensitiveDataSanitization) {
-            evt = sanitizeSensitiveData(evt);
-        }
+    const optimized: OptimizedEvent[] = pipelineEvents.map((event) => {
+        const evt = event;
 
         const timestamp = OPTIMIZER_CONFIG.enableTimestampSimplification
             ? simplifyTimestamp(evt.timestamp, sessionStart)
             : evt.timestamp;
+
+        if (isCorrelatedNetworkEvent(evt)) {
+            const summarizedResponseBody = evt.response
+                ? summarizeResponseBody(evt.response.body)
+                : undefined;
+
+            const optimizedEvt: OptimizedEvent = {
+                t: timestamp,
+                type: abbreviateEventType(evt.type),
+                msg: evt.message,
+                response: evt.response
+                    ? {
+                        t: OPTIMIZER_CONFIG.enableTimestampSimplification
+                            ? simplifyTimestamp(evt.response.timestamp, sessionStart)
+                            : evt.response.timestamp,
+                        ...(evt.response.status !== undefined ? { status: evt.response.status } : {}),
+                        ...(summarizedResponseBody ? { body: summarizedResponseBody } : {}),
+                    }
+                    : null,
+            };
+
+            if (evt.requestBody !== undefined) {
+                optimizedEvt.body = processPayloadRecursive(evt.requestBody);
+            }
+
+            return optimizedEvt;
+        }
 
         // Try to parse details if it's a string, to avoid escaped JSON in output
         let details: any = evt.details;
@@ -272,20 +631,12 @@ export function optimizeEventsForLLM(
             }
         }
 
-        // Extract status for network events
+        // Extract request body for network events that were not correlated
         if (evt.type === EventType.NETWORK && rawDetails) {
             try {
                 const detailsObj = JSON.parse(rawDetails);
-                if (detailsObj.status) {
-                    optimizedEvt.status = detailsObj.status;
-                }
-                // Extract and process body for requests
                 if (detailsObj.body) {
                     optimizedEvt.body = processPayloadRecursive(detailsObj.body);
-                }
-                // Extract schema only for response body (not full values)
-                if (detailsObj.responseBody) {
-                    optimizedEvt.responseBody = extractSchemaOnly(detailsObj.responseBody);
                 }
             } catch {
                 // Ignore parse errors
@@ -360,7 +711,7 @@ export function optimizeEventsForLLM(
 
             // Remove the dummy field from output and unescape newlines
             const cleaned = toonEncoded
-                .replace(/_format: yaml\n\s*/g, '')  // Remove dummy field
+                .replace(/\n\s*_format:\s*yaml/g, '') // Remove dummy field line only
                 .replace(/\\n/g, '\n')                // Unescape newlines
                 .replace(/\\t/g, '\t');               // Unescape tabs
 
@@ -500,64 +851,103 @@ export function deduplicateNetworkEvents(events: QAEvent[]): QAEvent[] {
 }
 
 export function collapseViteReloadNoise(events: QAEvent[]): QAEvent[] {
+    const viteCandidates: Array<{ index: number; event: QAEvent; timestampMs: number; url?: string }> = [];
+
+    for (let index = 0; index < events.length; index += 1) {
+        const event = events[index];
+        if (event.type !== EventType.NETWORK) {
+            continue;
+        }
+
+        const { status, url } = extractNetworkMetadata(event);
+        if (isErrorStatus(status) || !isViteReloadNoise(url)) {
+            continue;
+        }
+
+        viteCandidates.push({
+            index,
+            event,
+            timestampMs: new Date(event.timestamp).getTime(),
+            url,
+        });
+    }
+
+    if (viteCandidates.length === 0) {
+        return events;
+    }
+
+    const groupByStartIndex = new Map<number, Array<{ index: number; event: QAEvent; url?: string }>>();
+    let currentGroup: Array<{ index: number; event: QAEvent; url?: string; timestampMs: number }> = [];
+
+    const flushGroup = () => {
+        if (currentGroup.length === 0) {
+            return;
+        }
+
+        groupByStartIndex.set(
+            currentGroup[0].index,
+            currentGroup.map(({ index, event, url }) => ({ index, event, url }))
+        );
+        currentGroup = [];
+    };
+
+    for (const candidate of viteCandidates) {
+        if (currentGroup.length === 0) {
+            currentGroup.push(candidate);
+            continue;
+        }
+
+        const previous = currentGroup[currentGroup.length - 1];
+        if ((candidate.timestampMs - previous.timestampMs) <= VITE_BURST_WINDOW_MS) {
+            currentGroup.push(candidate);
+            continue;
+        }
+
+        flushGroup();
+        currentGroup.push(candidate);
+    }
+
+    flushGroup();
+
+    const skippedIndices = new Set<number>();
     const result: QAEvent[] = [];
-    let burst: QAEvent[] = [];
 
-    const flushBurst = () => {
-        if (burst.length === 0) {
-            return;
+    for (let index = 0; index < events.length; index += 1) {
+        if (skippedIndices.has(index)) {
+            continue;
         }
 
-        if (burst.length === 1) {
-            result.push(burst[0]);
-            burst = [];
-            return;
+        const group = groupByStartIndex.get(index);
+        if (!group) {
+            result.push(events[index]);
+            continue;
         }
 
-        const uniqueUrls = new Set<string>();
-        for (const event of burst) {
-            const { url } = extractNetworkMetadata(event);
-            if (url) {
-                uniqueUrls.add(url);
-            }
+        if (group.length === 1) {
+            result.push(group[0].event);
+            continue;
         }
 
+        for (let i = 1; i < group.length; i += 1) {
+            skippedIndices.add(group[i].index);
+        }
+
+        const uniqueUrls = new Set(group.map((item) => item.url).filter(Boolean));
         const summary: QAEvent = {
-            id: `vite-burst-${burst[0].id}`,
+            id: `vite-burst-${group[0].event.id}`,
             type: EventType.NETWORK,
-            timestamp: burst[0].timestamp,
-            message: `Vite dev reload burst collapsed (${burst.length} requests)`,
+            timestamp: group[0].event.timestamp,
+            message: `Vite dev reload burst collapsed (${group.length} requests)`,
             details: JSON.stringify({
                 summaryType: 'vite_reload_burst',
-                collapsedRequestCount: burst.length,
+                collapsedRequestCount: group.length,
                 uniqueUrlCount: uniqueUrls.size,
             }),
         };
 
         result.push(summary);
-        burst = [];
-    };
-
-    for (const event of events) {
-        if (event.type !== EventType.NETWORK) {
-            flushBurst();
-            result.push(event);
-            continue;
-        }
-
-        const { status, url } = extractNetworkMetadata(event);
-        const shouldCollapse = !isErrorStatus(status) && isViteReloadNoise(url);
-
-        if (shouldCollapse) {
-            burst.push(event);
-            continue;
-        }
-
-        flushBurst();
-        result.push(event);
     }
 
-    flushBurst();
     return result;
 }
 

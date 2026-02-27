@@ -1,8 +1,4 @@
----
-title: "Terrific MCP setup for Cursor"
-updated: "2026-02-27T00:00:00Z"
-commit: "b3fb40c"
----
+# Terrific MCP setup for Cursor
 
 ## Overview
 

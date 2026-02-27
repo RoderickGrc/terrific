@@ -12,6 +12,17 @@ import {
 } from './eventOptimizer.js';
 import { QAEvent, EventType } from '../types/index.js';
 
+function runOptimizerAsJson(events: QAEvent[], sessionStart: number): any[] {
+    const previous = OPTIMIZER_CONFIG.enableToonEncoding;
+    OPTIMIZER_CONFIG.enableToonEncoding = false;
+
+    try {
+        return JSON.parse(optimizeEventsForLLM(events, sessionStart));
+    } finally {
+        OPTIMIZER_CONFIG.enableToonEncoding = previous;
+    }
+}
+
 describe('eventOptimizer', () => {
     describe('debounceInputEvents', () => {
         it('should collapse consecutive input events on same element', () => {
@@ -419,6 +430,242 @@ describe('eventOptimizer', () => {
             expect(collapsed).toHaveLength(2);
             expect(collapsed[0].id).toBe('a1');
             expect(collapsed[1].id).toBe('a2');
+        });
+
+        it('merges request and response NETWORK events', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'req-1',
+                    type: EventType.NETWORK,
+                    message: 'GET http://localhost:5173/api/users?page=1',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({
+                        method: 'GET',
+                        url: 'http://localhost:5173/api/users?page=1&t=123',
+                    }),
+                },
+                {
+                    id: 'res-1',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/api/users?page=1',
+                    timestamp: '2026-01-01T10:00:00.120Z',
+                    details: JSON.stringify({
+                        status: 200,
+                        url: 'http://localhost:5173/api/users?page=1&t=999',
+                        responseBody: [{ id: 1, name: 'Ada' }],
+                    }),
+                },
+            ];
+
+            const optimized = runOptimizerAsJson(events, new Date('2026-01-01T10:00:00.000Z').getTime());
+            const net = optimized.find((evt) => evt.type === 'NET');
+
+            expect(net).toBeDefined();
+            expect(net.msg).toBe('GET http://localhost:5173/api/users?page=1');
+            expect(net.response).toEqual({
+                t: '00:00.1',
+                status: 200,
+                body: '[{id, name}]×1',
+            });
+            expect(net.status).toBeUndefined();
+            expect(net.responseBody).toBeUndefined();
+            expect(net.duration).toBeUndefined();
+        });
+
+        it('pairs concurrent identical requests FIFO', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'req-a',
+                    type: EventType.NETWORK,
+                    message: 'GET http://localhost:5173/api/items?sort=asc&t=1',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({ method: 'GET', url: 'http://localhost:5173/api/items?sort=asc&t=1' }),
+                },
+                {
+                    id: 'req-b',
+                    type: EventType.NETWORK,
+                    message: 'GET http://localhost:5173/api/items?sort=asc&t=2',
+                    timestamp: '2026-01-01T10:00:00.010Z',
+                    details: JSON.stringify({ method: 'GET', url: 'http://localhost:5173/api/items?sort=asc&t=2' }),
+                },
+                {
+                    id: 'res-a',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/api/items?sort=asc&t=3',
+                    timestamp: '2026-01-01T10:00:00.100Z',
+                    details: JSON.stringify({ status: 200, url: 'http://localhost:5173/api/items?sort=asc&t=3', responseBody: { id: 1 } }),
+                },
+                {
+                    id: 'res-b',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/api/items?sort=asc&t=4',
+                    timestamp: '2026-01-01T10:00:00.200Z',
+                    details: JSON.stringify({ status: 200, url: 'http://localhost:5173/api/items?sort=asc&t=4', responseBody: { id: 2 } }),
+                },
+            ];
+
+            const optimized = runOptimizerAsJson(events, new Date('2026-01-01T10:00:00.000Z').getTime());
+            const netEvents = optimized.filter((evt) => evt.type === 'NET');
+
+            expect(netEvents).toHaveLength(2);
+            expect(netEvents[0].response?.body).toBe('{id:number}');
+            expect(netEvents[1].response?.body).toBe('{id:number}');
+            expect(netEvents[0].response?.t).toBe('00:00.1');
+            expect(netEvents[1].response?.t).toBe('00:00.2');
+        });
+
+        it('emits request NET event with null response when missing response', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'req-only',
+                    type: EventType.NETWORK,
+                    message: 'POST https://api.example.com/orders',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({
+                        method: 'POST',
+                        url: 'https://api.example.com/orders',
+                        body: { sku: 'ABC', qty: 2 },
+                    }),
+                },
+            ];
+
+            const optimized = runOptimizerAsJson(events, new Date('2026-01-01T10:00:00.000Z').getTime());
+            expect(optimized).toHaveLength(1);
+            expect(optimized[0].msg).toBe('POST https://api.example.com/orders');
+            expect(optimized[0].response).toBeNull();
+            expect(optimized[0].body).toEqual({ sku: 'ABC', qty: 2 });
+        });
+
+        it('emits response-only NET event when request is missing', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'res-only',
+                    type: EventType.NETWORK,
+                    message: '404 https://api.example.com/orders/999',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({
+                        status: 404,
+                        url: 'https://api.example.com/orders/999',
+                        responseBody: { message: 'not found' },
+                    }),
+                },
+            ];
+
+            const optimized = runOptimizerAsJson(events, new Date('2026-01-01T10:00:00.000Z').getTime());
+            expect(optimized).toHaveLength(1);
+            expect(optimized[0].msg).toBe('NET https://api.example.com/orders/999');
+            expect(optimized[0].response).toEqual({
+                t: '00:00.0',
+                status: 404,
+                body: '{message:string}',
+            });
+        });
+
+        it('preserves 4xx/5xx vite events from collapse', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'v1',
+                    type: EventType.NETWORK,
+                    message: '404 http://127.0.0.1:5173/@vite/client',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({ status: 404, url: 'http://127.0.0.1:5173/@vite/client' }),
+                },
+                {
+                    id: 'v2',
+                    type: EventType.NETWORK,
+                    message: '500 http://127.0.0.1:5173/src/main.tsx',
+                    timestamp: '2026-01-01T10:00:00.100Z',
+                    details: JSON.stringify({ status: 500, url: 'http://127.0.0.1:5173/src/main.tsx' }),
+                },
+            ];
+
+            const collapsed = collapseViteReloadNoise(events);
+            expect(collapsed).toHaveLength(2);
+            expect(collapsed[0].id).toBe('v1');
+            expect(collapsed[1].id).toBe('v2');
+        });
+
+        it('collapses vite noise with interleaved events using time window', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'v1',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/@vite/client',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({ status: 200, url: 'http://localhost:5173/@vite/client' }),
+                },
+                {
+                    id: 'a1',
+                    type: EventType.ACTION,
+                    message: 'click on BUTTON#save',
+                    timestamp: '2026-01-01T10:00:00.300Z',
+                    details: JSON.stringify({ action: 'click', selector: '#save' }),
+                },
+                {
+                    id: 'v2',
+                    type: EventType.NETWORK,
+                    message: '200 http://localhost:5173/@id/__x00__react',
+                    timestamp: '2026-01-01T10:00:00.700Z',
+                    details: JSON.stringify({ status: 200, url: 'http://localhost:5173/@id/__x00__react' }),
+                },
+            ];
+
+            const collapsed = collapseViteReloadNoise(events);
+            expect(collapsed).toHaveLength(2);
+            expect(collapsed[0].message).toContain('Vite dev reload burst collapsed (2 requests)');
+            expect(collapsed[1].id).toBe('a1');
+        });
+
+        it('does not collapse localhost non-vite API events', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'api-1',
+                    type: EventType.NETWORK,
+                    message: 'GET http://0.0.0.0:5173/api/users',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({ method: 'GET', url: 'http://0.0.0.0:5173/api/users' }),
+                },
+                {
+                    id: 'api-2',
+                    type: EventType.NETWORK,
+                    message: 'GET http://0.0.0.0:5173/api/projects',
+                    timestamp: '2026-01-01T10:00:00.050Z',
+                    details: JSON.stringify({ method: 'GET', url: 'http://0.0.0.0:5173/api/projects' }),
+                },
+            ];
+
+            const collapsed = collapseViteReloadNoise(events);
+            expect(collapsed).toHaveLength(2);
+            expect(collapsed[0].id).toBe('api-1');
+            expect(collapsed[1].id).toBe('api-2');
+        });
+
+        it('keeps NET output free of redundant fields', () => {
+            const events: QAEvent[] = [
+                {
+                    id: 'req-clean',
+                    type: EventType.NETWORK,
+                    message: 'GET https://api.example.com/health',
+                    timestamp: '2026-01-01T10:00:00.000Z',
+                    details: JSON.stringify({ method: 'GET', url: 'https://api.example.com/health' }),
+                },
+                {
+                    id: 'res-clean',
+                    type: EventType.NETWORK,
+                    message: '200 https://api.example.com/health',
+                    timestamp: '2026-01-01T10:00:00.050Z',
+                    details: JSON.stringify({ status: 200, url: 'https://api.example.com/health' }),
+                },
+            ];
+
+            const optimized = runOptimizerAsJson(events, new Date('2026-01-01T10:00:00.000Z').getTime());
+            const net = optimized[0];
+
+            expect(net.type).toBe('NET');
+            expect(net).not.toHaveProperty('duration');
+            expect(net).not.toHaveProperty('requestTimestamp');
+            expect(net).not.toHaveProperty('status');
+            expect(net.response).toEqual({ t: '00:00.0', status: 200 });
         });
     });
 });
