@@ -42,7 +42,7 @@ describe('ContextService', () => {
 
     expect(rendered.filename).toBe('2026-01-01T10-05-30-checkout-flow-context.txt');
     expect(rendered.content).toContain('=== CONTEXT ===');
-    expect(rendered.content).toContain('Filters: All events');
+    expect(rendered.content).toContain('Export filters: All events');
     expect(rendered.content).toContain('=== EVENT LOG ===');
     expect(rendered.content).toContain('=== END OF EXPORT ===');
   });

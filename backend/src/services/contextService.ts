@@ -99,7 +99,7 @@ export class ContextService {
       `Initial URL: ${session.config?.initialUrl || 'N/A'}`,
       `Resolution: ${session.config?.resolution || 'N/A'}`,
       `Features: Actions:${session.config?.recordActions}, Console:${session.config?.recordConsole}, Network:${session.config?.recordNetwork}, Video:${session.config?.recordVideo}`,
-      `Filters: ${filterInfo}`,
+      `Export filters: ${filterInfo}`,
       `Events exported: ${eventsToExport.length} of ${(session.events || []).length}`,
       `Filters: ${filtersSourceLabel}`,
       '',

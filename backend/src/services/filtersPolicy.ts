@@ -309,20 +309,15 @@ function shouldPreserveNetwork(meta: ParsedNetworkMeta, policy: NetworkFilterPol
   if (typeof meta.status === 'number' && meta.status >= policy.preserveStatusGte) {
     return true;
   }
-
-  if (meta.method && policy.preserveMethods.has(meta.method)) {
-    return true;
-  }
-
   return false;
 }
 
 function shouldIgnoreNetwork(meta: ParsedNetworkMeta, policy: NetworkFilterPolicy): boolean {
-  if (!meta.url || typeof meta.status !== 'number') {
+  if (!meta.url) {
     return false;
   }
 
-  if (meta.status >= policy.ignoreStatusLt) {
+  if (typeof meta.status === 'number' && meta.status >= policy.ignoreStatusLt) {
     return false;
   }
 
@@ -431,6 +426,11 @@ export function applyFilterPolicyToEvents(events: QAEvent[], policy: NetworkFilt
 
     if (shouldIgnoreNetwork(meta, policy)) {
       ignoredCount += 1;
+      continue;
+    }
+
+    if (meta.method && policy.preserveMethods.has(meta.method)) {
+      filtered.push(event);
       continue;
     }
 
