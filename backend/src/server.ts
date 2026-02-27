@@ -10,13 +10,15 @@ import { createReadStream } from 'fs';
 import sessionRoutes, { setSessionController } from './routes/session.js';
 import workspaceRoutes from './routes/workspace.js';
 import { SessionController } from './controllers/session.js';
-import { config } from './config.js';
+import { config, initializeRuntimeStorage } from './config.js';
 import { QAEvent } from './types/index.js';
 
 // Load .env from project root (two levels up from backend/src)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: resolve(__dirname, '../../.env') });
+
+await initializeRuntimeStorage();
 
 const app = express();
 const server = createServer(app);
@@ -300,4 +302,3 @@ server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`WebSocket server ready`);
 });
-

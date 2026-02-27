@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { config } from '../config.js';
 
 export interface Workspace {
@@ -22,9 +22,7 @@ export class WorkspaceRegistry {
   private initialized: boolean = false;
 
   private constructor() {
-    // Store workspaces.json in the project root directory (parent of sessions)
-    // We use the config.sessionsDir which is already set to the correct location
-    this.workspacesFile = join(config.sessionsDir, '../workspaces.json');
+    this.workspacesFile = config.workspacesFile;
     this.initialize();
   }
 
@@ -141,7 +139,7 @@ export class WorkspaceRegistry {
   private async save(): Promise<void> {
     try {
       // Ensure the directory exists
-      const workspacesDir = join(this.workspacesFile, '..');
+      const workspacesDir = dirname(this.workspacesFile);
       await fs.mkdir(workspacesDir, { recursive: true });
 
       const data: WorkspacesData = {

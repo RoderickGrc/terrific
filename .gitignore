@@ -35,6 +35,7 @@ Thumbs.db
 .DS_Store
 
 credentials.json
+workspaces.json
 
 # Local workspace registry (paths are machine-specific)
 .terrific/
