@@ -9,6 +9,7 @@ export enum EventType {
   FLAG = 'FLAG',
   BUG = 'BUG',
   SERVER_LOG = 'SERVER_LOG',
+  SESSION_STOPPED = 'SESSION_STOPPED',
 }
 
 export interface QAEvent {
@@ -22,6 +23,10 @@ export interface QAEvent {
 
 export type Resolution = 'FHD' | 'HD' | 'Tablet' | 'Mobile' | 'Dynamic';
 
+export type RecordingMode = 'browser' | 'screen';
+
+export type ScreenSelection = 'primary' | 'secondary' | 'all';
+
 export type SessionType = 'browser' | 'debug_gateway';
 
 export interface SessionConfig {
@@ -30,6 +35,8 @@ export interface SessionConfig {
   recordConsole: boolean;
   recordNetwork: boolean;
   recordVideo: boolean;
+  recordingMode?: RecordingMode; // 'browser' | 'screen' (default: 'browser')
+  screenToRecord?: ScreenSelection; // 'primary' | 'secondary' | 'all' (default: 'primary')
   initialUrl: string;
   name?: string;
   resolution?: Resolution;

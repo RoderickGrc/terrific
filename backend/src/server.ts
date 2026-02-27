@@ -6,8 +6,9 @@ import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { promises as fs } from 'fs';
-import { createReadStream, appendFileSync } from 'fs';
+import { createReadStream } from 'fs';
 import sessionRoutes, { setSessionController } from './routes/session.js';
+import workspaceRoutes from './routes/workspace.js';
 import { SessionController } from './controllers/session.js';
 import { config } from './config.js';
 import { QAEvent } from './types/index.js';
@@ -21,8 +22,9 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
+// Allow any origin for local development
 app.use(cors({
-  origin: [config.corsOrigin, 'http://localhost:3000', 'http://localhost:5173'],
+  origin: '*',
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -55,16 +57,22 @@ setSessionController(sessionController);
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url || '', `http://${req.headers.host}`);
   const sessionId = url.searchParams.get('sessionId');
+  const workspaceHash = url.searchParams.get('workspace');
 
   if (!sessionId) {
     ws.close(1008, 'sessionId required');
     return;
   }
 
+  // Store workspace hash with connection for use in session operations
+  (ws as any).workspaceHash = workspaceHash;
+
   if (!sessionClients.has(sessionId)) {
     sessionClients.set(sessionId, new Set());
   }
   sessionClients.get(sessionId)!.add(ws);
+
+  console.log(`[WebSocket] Client connected`, { sessionId, workspaceHash });
 
   ws.on('close', () => {
     const clients = sessionClients.get(sessionId);
@@ -74,6 +82,7 @@ wss.on('connection', (ws, req) => {
         sessionClients.delete(sessionId);
       }
     }
+    console.log(`[WebSocket] Client disconnected`, { sessionId, workspaceHash });
   });
 
   ws.on('error', (error) => {
@@ -82,8 +91,34 @@ wss.on('connection', (ws, req) => {
 });
 
 // API Routes
+app.use('/api/workspaces', workspaceRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/credentials', (await import('./routes/credentials.js')).default);
+
+// Helper function to resolve sessions directory based on workspace hash
+async function getSessionsDirFromRequest(req: express.Request): Promise<string> {
+  const workspaceHash = req.headers['x-workspace-hash'] as string || req.query.workspace as string;
+  if (!workspaceHash) {
+    // No workspace context, use default sessions directory
+    return join(config.sessionsDir);
+  }
+
+  // Import WorkspaceRegistry to get workspace path
+  const { WorkspaceRegistry } = await import('./services/workspaceRegistry.js');
+  const workspaceRegistry = WorkspaceRegistry.getInstance();
+  const workspace = workspaceRegistry.getWorkspace(workspaceHash);
+
+  if (workspace) {
+    // Return workspace-specific sessions directory
+    const workspaceSessionsDir = join(workspace.path, 'sessions');
+    console.log(`[File Request] Using workspace sessions directory: ${workspaceSessionsDir}`);
+    return workspaceSessionsDir;
+  }
+
+  // Workspace not found, fallback to default
+  console.log(`[File Request] Workspace ${workspaceHash} not found, using default sessions directory`);
+  return join(config.sessionsDir);
+}
 
 // Helper function to find video file in session directory
 async function findVideoFile(sessionDir: string): Promise<string | null> {
@@ -116,11 +151,14 @@ app.get('/api/sessions/:id/files/:filename', async (req, res) => {
       return;
     }
 
+    // Get the correct sessions directory based on workspace context
+    const sessionsDir = await getSessionsDirFromRequest(req);
+
     // Find session directory (supports both formats: UUID and DATE_TIME_UUID)
     let sessionDir: string | null = null;
 
     // Try direct match first (id could be the full directory name)
-    const directPath = join(config.sessionsDir, id);
+    const directPath = join(sessionsDir, id);
     console.log(`[File Request] Trying direct path: ${directPath}`);
     try {
       const stat = await fs.stat(directPath);
@@ -136,13 +174,13 @@ app.get('/api/sessions/:id/files/:filename', async (req, res) => {
     // If not found, search for date-prefixed directory
     if (!sessionDir) {
       try {
-        const entries = await fs.readdir(config.sessionsDir, { withFileTypes: true });
+        const entries = await fs.readdir(sessionsDir, { withFileTypes: true });
         console.log(`[File Request] Searching in sessions directory, found ${entries.length} entries`);
         for (const entry of entries) {
           if (entry.isDirectory()) {
             // Check if it matches the full directory name or ends with _UUID
             if (entry.name === id || entry.name.endsWith(`_${id}`)) {
-              sessionDir = join(config.sessionsDir, entry.name);
+              sessionDir = join(sessionsDir, entry.name);
               console.log(`[File Request] Found matching directory: ${sessionDir}`);
               break;
             }
@@ -187,75 +225,69 @@ app.get('/api/sessions/:id/files/:filename', async (req, res) => {
         res.setHeader('Content-Type', 'video/webm');
         res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Cache-Control', 'public, max-age=3600');
-        res.setHeader('Content-Length', fileStats.size);
       }
-    }
 
       // Handle range requests for video seeking
       const range = req.headers.range;
-    if (range && isVideo) {
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileStats.size - 1;
-      const chunksize = (end - start) + 1;
+      if (range && isVideo) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileStats.size - 1;
+        const chunksize = (end - start) + 1;
 
-      res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${end}/${fileStats.size}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': chunksize,
-        'Content-Type': 'video/webm',
-      });
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${fileStats.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': 'video/webm',
+        });
 
-
-      const fileStream = createReadStream(filePath, { start, end });
-      fileStream.pipe(res);
-      fileStream.on('error', (err: Error) => {
-        console.error('[File Request] Stream error:', err);
+        const fileStream = createReadStream(filePath, { start, end });
+        fileStream.pipe(res);
+        fileStream.on('error', (err: Error) => {
+          console.error('[File Request] Stream error:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Error streaming file', details: err.message });
+          }
+        });
+      } else {
+        // Send full file
         if (!res.headersSent) {
-          res.status(500).json({ error: 'Error streaming file', details: err.message });
+          res.setHeader('Content-Length', fileStats.size);
+          res.status(200);
         }
-      });
-    } else {
-      // Send full file
-
-      // Ensure status 200 for full file requests
-      if (!res.headersSent) {
-        res.status(200);
-      }
-      const fileStream = createReadStream(filePath);
-      fileStream.pipe(res);
-      fileStream.on('error', (err: Error) => {
-        console.error('[File Request] Stream error:', err);
-
-        if (!res.headersSent) {
-          res.status(500).json({ error: 'Error streaming file', details: err.message });
-        }
-      });
-      fileStream.on('end', () => {
-        console.log(`[File Request] File served successfully: ${actualFilename} (${isVideo ? 'video/webm' : 'image'})`);
-      });
-    });
+        const fileStream = createReadStream(filePath);
+        fileStream.pipe(res);
+        fileStream.on('error', (err: Error) => {
+          console.error('[File Request] Stream error:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Error streaming file', details: err.message });
+          }
+        });
+        fileStream.on('end', () => {
+          console.log(`[File Request] File served successfully: ${actualFilename} (${isVideo ? 'video/webm' : 'image'})`);
+        });
       }
     } catch (error) {
-  console.error('[File Request] Error accessing file:', error);
-  console.error('[File Request] File path attempted:', filePath);
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  const errorStack = error instanceof Error ? error.stack : undefined;
-  console.error('[File Request] Error stack:', errorStack);
-  if (!res.headersSent) {
-    res.status(500).json({ error: 'Error accessing file', details: errorMessage });
-  }
-}
+      console.error('[File Request] Error accessing file:', error);
+      console.error('[File Request] File path attempted:', filePath);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      console.error('[File Request] Error stack:', errorStack);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Error accessing file', details: errorMessage });
+      }
+    }
   } catch (error) {
-  // Catch any unhandled errors in the entire handler
-  console.error('[File Request] Unhandled error:', error);
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  const errorStack = error instanceof Error ? error.stack : undefined;
-  console.error('[File Request] Unhandled error stack:', errorStack);
-  if (!res.headersSent) {
-    res.status(500).json({ error: 'Internal server error', details: errorMessage });
+    // Catch any unhandled errors in the entire handler
+    console.error('[File Request] Unhandled error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('[File Request] Unhandled error stack:', errorStack);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error', details: errorMessage });
+    }
   }
-}
 });
 
 // Health check

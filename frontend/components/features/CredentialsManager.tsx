@@ -4,6 +4,7 @@ import { X, Layers, Plus, Trash2, Globe, HardDrive, RefreshCw, Power } from 'luc
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { api } from '../../src/services/api';
+import { useWorkspace } from '../../WorkspaceContext';
 
 interface BrowserProfileManagerProps {
     isOpen: boolean;
@@ -12,6 +13,7 @@ interface BrowserProfileManagerProps {
 }
 
 export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ isOpen, onClose, onSelect }) => {
+    const { workspaceHash } = useWorkspace();
     const [profiles, setProfiles] = useState<BrowserProfile[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isAdding, setIsAdding] = useState(false);
@@ -22,7 +24,7 @@ export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ is
         if (isOpen) {
             const loadProfiles = async () => {
                 try {
-                    const data = await api.listCredentials();
+                    const data = await api.listCredentials(workspaceHash);
                     setProfiles(data);
                 } catch (err) {
                     console.error('Failed to load profiles:', err);
@@ -32,7 +34,7 @@ export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ is
             };
             loadProfiles();
         }
-    }, [isOpen]);
+    }, [isOpen, workspaceHash]);
 
     if (!isOpen) return null;
 
@@ -44,7 +46,7 @@ export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ is
                 alias: newProfile.alias,
                 targetUrl: newProfile.startUrl,
                 username: newProfile.description
-            });
+            }, workspaceHash);
 
             setProfiles(prev => [...prev, profile]);
             setIsAdding(false);
@@ -68,9 +70,9 @@ export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ is
 
         setConfiguringId(id);
         try {
-            await api.launchCredential(id);
+            await api.launchCredential(id, workspaceHash);
             // Refresh the profile to get updated state
-            const updatedProfiles = await api.listCredentials();
+            const updatedProfiles = await api.listCredentials(workspaceHash);
             setProfiles(updatedProfiles);
             alert('✅ State saved successfully');
         } catch (err) {
@@ -88,7 +90,7 @@ export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ is
     const deleteProfile = async (id: string) => {
         if (!confirm('Delete this profile? This cannot be undone.')) return;
         try {
-            await api.deleteCredential(id);
+            await api.deleteCredential(id, workspaceHash);
             setProfiles(prev => prev.filter(p => p.id !== id));
         } catch (err) {
             console.error('Failed to delete profile:', err);

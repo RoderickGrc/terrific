@@ -146,7 +146,7 @@ Z`;
     });
 
     it('debe manejar el ejemplo real del usuario', () => {
-        const c1 = `![SOF.IA]()
+        const c1 = `![Logo]()
 
 Sigue estos pasos para personalizar tu organización y activar tu asistente con IA.
 
@@ -164,15 +164,15 @@ Crear departamento`;
 
         const c2 = `Te quedan 13 días de tu plan gratuito. [BUTTON: ¡Mejora tu plan ahora!]
 
- [BUTTON: ![Rodrigo logo]()]
+ [BUTTON: ![User logo]()]
 
-Rodrigo
+User
 
 ![Minimizar sidebar]()
 
 ![Logo]()
 
--   Rodrigo
+-   User
 
  [BUTTON: ![Menú]()]`;
 

@@ -7,11 +7,15 @@ import { Button } from '../ui/Button';
 import { BrowserProfileManager } from './CredentialsManager';
 import { Badge } from '../ui/Badge';
 import { DebugServerPanel } from './DebugServerPanel';
+import { McpServerPanel } from './McpServerPanel';
 import { api } from '../../src/services/api';
+import { useWorkspace } from '../../WorkspaceContext';
+import { buildSessionFileUrl } from '../../src/services/backendUrls';
 import type { BrowserProfile } from '../../types';
 
 export const SessionConfig: React.FC = () => {
     const navigate = useNavigate();
+    const { workspaceHash } = useWorkspace();
     const [url, setUrl] = useState('');
     const [sessionName, setSessionName] = useState('');
     const [resolution, setResolution] = useState<Resolution>('Dynamic');
@@ -26,6 +30,9 @@ export const SessionConfig: React.FC = () => {
     const [hasMore, setHasMore] = useState(true);
     const observerTarget = useRef<HTMLDivElement>(null);
 
+    // Recording mode state (browser will prompt user to choose screen)
+    const [recordingMode, setRecordingMode] = useState<'browser' | 'screen'>('browser');
+
     // Config State
     const [config, setConfig] = useState({
         recordActions: true,
@@ -39,7 +46,7 @@ export const SessionConfig: React.FC = () => {
     useEffect(() => {
         const loadSessions = async () => {
             try {
-                const data = await api.listSessions();
+                const data = await api.listSessions(workspaceHash);
                 const sorted = data.sort((a, b) => b.startTime - a.startTime);
                 setPreviousSessions(sorted);
                 setHasMore(sorted.length > displayedCount);
@@ -50,7 +57,7 @@ export const SessionConfig: React.FC = () => {
             }
         };
         loadSessions();
-    }, []);
+    }, [workspaceHash]);
 
     // Intersection Observer for lazy loading
     useEffect(() => {
@@ -82,7 +89,7 @@ export const SessionConfig: React.FC = () => {
     useEffect(() => {
         const loadProfiles = async () => {
             try {
-                const data = await api.listCredentials();
+                const data = await api.listCredentials(workspaceHash);
                 setProfiles(data);
             } catch (err) {
                 console.error("Failed to load profiles:", err);
@@ -91,7 +98,7 @@ export const SessionConfig: React.FC = () => {
             }
         };
         loadProfiles();
-    }, []);
+    }, [workspaceHash]);
 
     const handleStart = async () => {
         if (!url) return;
@@ -102,8 +109,9 @@ export const SessionConfig: React.FC = () => {
                 initialUrl: url,
                 resolution,
                 profileId: profileId || undefined,
+                recordingMode,
                 ...config
-            });
+            }, workspaceHash);
             navigate(`/session/${newSession.id}`);
         } catch (err) {
             console.error("Failed to start session:", err);
@@ -200,6 +208,56 @@ export const SessionConfig: React.FC = () => {
                             </div>
                         </div>
 
+                        {/* Recording Mode - Only show if recordVideo is enabled */}
+                        {config.recordVideo && (
+                            <div className="space-y-3">
+                                <div className="space-y-1.5">
+                                    <label className="text-[13px] font-medium text-zinc-300">Recording Mode</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            onClick={() => setRecordingMode('browser')}
+                                            className={`py-3 px-4 rounded-lg text-[13px] font-medium border transition-all ${recordingMode === 'browser'
+                                                ? 'bg-zinc-100 border-zinc-100 text-black shadow-lg'
+                                                : 'bg-transparent border-white/10 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200'
+                                                }`}
+                                        >
+                                            <div className="flex flex-col items-center gap-1.5">
+                                                <span className="text-xl">🪟</span>
+                                                <span className="font-semibold">Browser Window</span>
+                                                <span className="text-[10px] opacity-70">Automatic</span>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => setRecordingMode('screen')}
+                                            className={`py-3 px-4 rounded-lg text-[13px] font-medium border transition-all ${recordingMode === 'screen'
+                                                ? 'bg-zinc-100 border-zinc-100 text-black shadow-lg'
+                                                : 'bg-transparent border-white/10 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200'
+                                                }`}
+                                        >
+                                            <div className="flex flex-col items-center gap-1.5">
+                                                <span className="text-xl">🖥️</span>
+                                                <span className="font-semibold">Full Screen</span>
+                                                <span className="text-[10px] opacity-70">You choose</span>
+                                            </div>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Explanation for Full Screen mode */}
+                                {recordingMode === 'screen' && (
+                                    <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3">
+                                        <p className="text-[11px] text-blue-400 flex items-start gap-2">
+                                            <span className="mt-0.5">ℹ️</span>
+                                            <span>
+                                                Your browser will ask you to <strong>select what to record</strong>:
+                                                a tab, window, or entire screen. You can choose any monitor visually.
+                                            </span>
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {/* Toggles Grid */}
                         <div className="pt-6 border-t border-white/5">
                             <label className="text-[13px] font-medium text-zinc-300 block mb-4">Recording Options</label>
@@ -245,6 +303,7 @@ export const SessionConfig: React.FC = () => {
                     </div>
 
                     <DebugServerPanel />
+                    <McpServerPanel />
                 </div>
             </div>
 
@@ -263,7 +322,7 @@ export const SessionConfig: React.FC = () => {
                     ) : (
                         <>
                             {previousSessions.slice(0, displayedCount).map(session => (
-                                <SessionCard key={session.id} session={session} onClick={() => navigate(`/replay/${session.id}`)} />
+                                <SessionCard key={session.id} session={session} onClick={() => navigate(workspaceHash ? `/workspace/${workspaceHash}/replay/${session.id}` : `/replay/${session.id}`)} />
                             ))}
                         </>
                     )}
@@ -302,8 +361,6 @@ interface SessionCardProps {
 }
 
 const SessionCard: React.FC<SessionCardProps> = ({ session, onClick }) => {
-    const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
-
     return (
         <div
             onClick={onClick}
@@ -311,7 +368,7 @@ const SessionCard: React.FC<SessionCardProps> = ({ session, onClick }) => {
         >
             <div className="relative h-44 bg-zinc-950 overflow-hidden">
                 {session.previewImage ? (
-                    <img src={`${API_BASE_URL}/api/sessions/${session.id}/files/${session.previewImage}`} alt="Preview" className="w-full h-full object-cover opacity-70 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500 saturate-0 group-hover:saturate-100" />
+                    <img src={session.previewImage ? buildSessionFileUrl(session.id, session.previewImage) : ''} alt="Preview" className="w-full h-full object-cover opacity-70 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500 saturate-0 group-hover:saturate-100" />
                 ) : (
                     <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
                         <Video size={48} className="text-zinc-800" />

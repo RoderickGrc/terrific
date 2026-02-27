@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { QAEvent, EventType } from '../../types';
 import { isServerLogError } from '../../src/utils/eventHelpers';
+import { buildSessionFileUrl } from '../../src/services/backendUrls';
 import {
     Server, Globe, Terminal, MousePointer2, Camera, Flag,
     ChevronRight, ChevronDown, Bug, MessageSquare, RefreshCw,
@@ -15,6 +16,7 @@ interface ActivityFeedProps {
     onEventClick?: (event: QAEvent) => void;
     activeEventId?: string | null;
     onEventsChange?: (updatedEvents: QAEvent[]) => void;
+    sessionId?: string;
 }
 
 const getEventIcon = (event: QAEvent) => {
@@ -49,7 +51,8 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
     autoScroll = true,
     activeEventId,
     onEventClick,
-    onEventsChange
+    onEventsChange,
+    sessionId
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -337,11 +340,24 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                                                 <pre className="text-[10px] font-mono text-zinc-400 whitespace-pre-wrap break-all">
                                                     {event.details}
                                                 </pre>
-                                                {event.type === EventType.SCREENSHOT && (
-                                                    <div className="mt-2 border border-zinc-800 rounded overflow-hidden">
-                                                        <img src="https://picsum.photos/300/180" alt="Preview" className="w-full opacity-80" />
-                                                    </div>
-                                                )}
+                                                {event.type === EventType.SCREENSHOT && sessionId && (() => {
+                                                    try {
+                                                        const details = JSON.parse(event.details || '{}');
+                                                        const filename = details.filename;
+                                                        if (filename) {
+                                                            const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
+                                                            const imageUrl = buildSessionFileUrl(sessionId, filename);
+                                                            return (
+                                                                <div className="mt-2 border border-zinc-800 rounded overflow-hidden">
+                                                                    <img src={imageUrl} alt="Screenshot Preview" className="w-full opacity-80" />
+                                                                </div>
+                                                            );
+                                                        }
+                                                    } catch (e) {
+                                                        console.error('Error parsing screenshot details:', e);
+                                                    }
+                                                    return null;
+                                                })()}
                                             </div>
                                         </div>
                                     )}

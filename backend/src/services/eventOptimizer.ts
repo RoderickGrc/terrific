@@ -66,6 +66,56 @@ function processPayloadRecursive(obj: any): any {
     return obj;
 }
 
+/**
+ * Extract only the schema (field names and types) from response bodies.
+ * This significantly reduces token count while preserving structural information.
+ */
+function extractSchemaOnly(obj: any, depth: number = 0): string {
+    if (obj === null) return 'null';
+    if (obj === undefined) return 'undefined';
+
+    const type = typeof obj;
+
+    if (type === 'string') return 'string';
+    if (type === 'number') return 'number';
+    if (type === 'boolean') return 'boolean';
+
+    if (Array.isArray(obj)) {
+        if (obj.length === 0) return '[]';
+        // For arrays, show schema of first item with count
+        const firstItemSchema = extractSchemaOnly(obj[0], depth + 1);
+        return `[${firstItemSchema}]×${obj.length}`;
+    }
+
+    if (type === 'object') {
+        // Prevent infinite recursion
+        if (depth > 3) return '{...}';
+
+        const keys = Object.keys(obj);
+        if (keys.length === 0) return '{}';
+
+        // For nested objects, show field names with their types
+        if (depth === 0) {
+            // Root level: compact inline format
+            const fields = keys.map(key => {
+                const value = obj[key];
+                const valueType = extractSchemaOnly(value, depth + 1);
+                // Only show type annotation for primitives or simple arrays
+                if (typeof value === 'object' && value !== null) {
+                    return key; // Just the field name for objects
+                }
+                return `${key}:${valueType}`;
+            });
+            return `{${fields.join(', ')}}`;
+        } else {
+            // Nested level: just list the keys
+            return `{${keys.join(', ')}}`;
+        }
+    }
+
+    return String(obj);
+}
+
 interface OptimizedEvent {
     t: string;       // Timestamp: "HH:mm:ss.ms" or "mm:ss" relative
     type: string;    // Event type abbreviated
@@ -74,6 +124,7 @@ interface OptimizedEvent {
     status?: number; // HTTP status (only for NETWORK)
     details?: any;   // Pruned details if relevant (parsed JSON for natural look)
     body?: any;      // Processed request body (for NETWORK POST/PUT/PATCH)
+    responseBody?: string; // Schema only (field names and types) for response bodies
 }
 
 /**
@@ -161,6 +212,10 @@ export function optimizeEventsForLLM(
                 if (detailsObj.body) {
                     optimizedEvt.body = processPayloadRecursive(detailsObj.body);
                 }
+                // Extract schema only for response body (not full values)
+                if (detailsObj.responseBody) {
+                    optimizedEvt.responseBody = extractSchemaOnly(detailsObj.responseBody);
+                }
             } catch {
                 // Ignore parse errors
             }
@@ -190,13 +245,22 @@ export function optimizeEventsForLLM(
                 } else if (detailStr.length < 200) {
                     optimizedEvt.details = details;
                 } else if (evt.type === EventType.ACTION) {
-                    // If details are too long but it's an action, preserve the most important parts
+                    // For all ACTION events, only keep essentials
                     try {
                         const detailsObj = typeof details === 'string' ? JSON.parse(details) : details;
                         const simplifiedDetails: any = {};
-                        if (detailsObj.text) simplifiedDetails.text = detailsObj.text;
-                        if (detailsObj.tagName) simplifiedDetails.tagName = detailsObj.tagName;
-                        if (detailsObj.id) simplifiedDetails.id = detailsObj.id;
+
+                        // Essential fields for all action types (click, input, change)
+                        if (detailsObj.action) simplifiedDetails.action = detailsObj.action;
+                        if (detailsObj.element) simplifiedDetails.element = detailsObj.element;
+                        if (detailsObj.selector) simplifiedDetails.selector = detailsObj.selector;
+                        if (detailsObj.value !== undefined) simplifiedDetails.value = detailsObj.value;
+                        if (detailsObj.xpath) simplifiedDetails.xpath = detailsObj.xpath;
+
+                        // Include placeholder for inputs (useful context)
+                        if (detailsObj.attributes?.placeholder) {
+                            simplifiedDetails.placeholder = detailsObj.attributes.placeholder;
+                        }
 
                         if (Object.keys(simplifiedDetails).length > 0) {
                             optimizedEvt.details = simplifiedDetails;
@@ -466,6 +530,7 @@ function abbreviateEventType(type: EventType): string {
         [EventType.PAGE_RELOAD]: 'RELOAD',
         [EventType.CRAWL]: 'CRAWL',
         [EventType.SERVER_LOG]: 'SVR',
+        [EventType.SESSION_STOPPED]: 'STOP',
     };
 
     return abbreviations[type] || type;

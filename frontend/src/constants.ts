@@ -1,7 +1,7 @@
 
-import { Session, EventType, BrowserProfile, QAEvent } from './types';
+import { Session, BrowserProfile, QAEvent } from './types';
 
-// Mock data for demonstration purposes
+// No mock event data; app uses real sessions from the backend
 export const REAL_EVENTS: QAEvent[] = [];
 
 export const RESOLUTIONS = ['Dynamic', '4K', '2K', 'FHD', 'HD', 'Tablet', 'Mobile'];
@@ -66,26 +66,25 @@ export const MOCK_SESSIONS: Session[] = [
       recordVideo: false,
       resolution: 'Mobile'
     },
-    events: REAL_EVENTS.slice(0, 20), // Subset for variety
+    events: [],
     previewImage: 'https://picsum.photos/seed/terr_demo2/800/450'
   }
 ];
 
 export const AI_DEBUG_PROMPT = `You are instrumenting code to log to the 'Terrific' Debug Gateway.
-Target Endpoint: http://localhost:3000/api/ingest
+Target Endpoint: http://localhost:4567/api/sessions/ingest
 Method: POST
 Headers: Content-Type: application/json
 
 Expected Payload Contract:
 {
-  "lvl": "log" | "warn" | "error",   // Optional, default: log
-  "src": string,                     // Required: Source ID (e.g., 'backend-api', 'auth-service')
   "message": string,                 // Required: The log message
-  "data": object,                    // Optional: Arbitrary JSON data/context
-  "category": string                 // Optional: Tag for filtering
+  "src": string,                     // Optional: Source ID (e.g., 'backend-api', 'auth-service'; defaults to 'external')
+  "lvl": "log" | "warn" | "error",   // Optional: Log level (defaults to 'log')
+  "data": object                     // Optional: Arbitrary JSON data/context
 }
 
 Instructions:
-1. Create a helper function or logger transport that sends this payload asynchronously.
+1. Create a helper function or logger transport that sends this payload asynchronously to /api/sessions/ingest.
 2. Ensure it handles connection errors gracefully (fire-and-forget).
-3. Instrument key logic flows in the provided code snippet to send telemetry to this endpoint.`;
+3. Rely on the backend to attach each log to the currently active session; you do not need to provide a sessionId.`;

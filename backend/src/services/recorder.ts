@@ -1,10 +1,9 @@
 import { Page } from 'playwright';
 import { EventEmitter } from 'events';
-import { EventType, QAEvent } from '../types/index.js';
+import { EventType, QAEvent, SessionContext } from '../types/index.js';
 import { generateShortId, generateEventId } from '../utils/id.js';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { config, getSessionDirName } from '../config.js';
 import { HtmlCrawler } from './htmlCrawler.js';
 
 export class EventRecorder extends EventEmitter {
@@ -17,16 +16,14 @@ export class EventRecorder extends EventEmitter {
     crawlOnScreenshot?: boolean;
   };
   private events: QAEvent[] = [];
-  private sessionId: string;
-  private createdAt?: string;
+  private sessionContext: SessionContext;
   private htmlCrawler: HtmlCrawler;
 
-  constructor(page: Page, config: { recordActions: boolean; recordConsole: boolean; recordNetwork: boolean; crawlOnReload?: boolean; crawlOnScreenshot?: boolean }, sessionId: string, createdAt?: string) {
+  constructor(page: Page, config: { recordActions: boolean; recordConsole: boolean; recordNetwork: boolean; crawlOnReload?: boolean; crawlOnScreenshot?: boolean }, sessionContext: SessionContext) {
     super();
     this.page = page;
     this.config = config;
-    this.sessionId = sessionId;
-    this.createdAt = createdAt;
+    this.sessionContext = sessionContext;
     this.htmlCrawler = new HtmlCrawler();
     // Wait for page to be ready before setting up listeners
     this.setupListeners();
@@ -124,17 +121,55 @@ export class EventRecorder extends EventEmitter {
         this.emit('event', event);
       });
 
-      this.page.on('response', (response) => {
+      this.page.on('response', async (response) => {
+        const method = response.request().method();
+        const contentType = response.headers()['content-type'] || '';
+
+        // Capture response body for API responses (JSON, text, etc)
+        let responseBody: any = undefined;
+        const isTextResponse = contentType.includes('application/json') ||
+          contentType.includes('text/') ||
+          contentType.includes('application/xml');
+
+        // Only capture body for likely API responses (not images, fonts, etc)
+        if (isTextResponse) {
+          try {
+            const bodyText = await response.text();
+            // Limit body size to prevent excessive memory usage (100KB max)
+            const truncatedBody = bodyText.length > 100000
+              ? bodyText.substring(0, 100000) + '...[TRUNCATED]'
+              : bodyText;
+
+            // Try to parse as JSON for better readability
+            try {
+              responseBody = JSON.parse(truncatedBody);
+            } catch {
+              // Keep as string if not valid JSON
+              responseBody = truncatedBody;
+            }
+          } catch (error) {
+            // Body already consumed or binary - ignore
+          }
+        }
+
+        const details: any = {
+          method,
+          status: response.status(),
+          statusText: response.statusText(),
+          url: response.url(),
+        };
+
+        // Include response body if captured
+        if (responseBody !== undefined) {
+          details.responseBody = responseBody;
+        }
+
         const event: QAEvent = {
           id: generateEventId('nt'),
           type: EventType.NETWORK,
           message: `${response.status()} ${response.url()}`,
           timestamp: new Date().toISOString(),
-          details: JSON.stringify({
-            status: response.status(),
-            statusText: response.statusText(),
-            url: response.url(),
-          }, null, 2),
+          details: JSON.stringify(details, null, 2),
         };
 
         this.events.push(event);
@@ -151,7 +186,7 @@ export class EventRecorder extends EventEmitter {
         const semanticLabel = eventData.semanticLabel || 'elemento sin descripción';
         const message = `${actionVerb}: "${semanticLabel}"`;
 
-        // Build minimal details for automation (no redundancy with message)
+        // Build details with all captured metadata
         const details: any = {
           action: eventData.type,
           element: eventData.tagName,
@@ -164,13 +199,43 @@ export class EventRecorder extends EventEmitter {
           details.selector = `[data-testid="${eventData.dataTestId}"]`;
         }
 
+        // Add extended metadata for automation
+        if (eventData.xpath) details.xpath = eventData.xpath;
+        if (eventData.cssPath) details.cssPath = eventData.cssPath;
+        if (eventData.roleSelector) details.roleSelector = eventData.roleSelector;
+
+        if (eventData.parentElement) details.parentElement = eventData.parentElement;
+        if (eventData.classes && eventData.classes.length > 0) details.classes = eventData.classes;
+        if (eventData.attributes) details.attributes = eventData.attributes;
+
+        if (eventData.disabled !== undefined) details.disabled = eventData.disabled;
+        if (eventData.checked !== undefined) details.checked = eventData.checked;
+        if (eventData.readonly !== undefined) details.readonly = eventData.readonly;
+        if (eventData.focused !== undefined) details.focused = eventData.focused;
+
         // Add value info for inputs/selects
         if (eventData.value !== undefined) {
           details.value = eventData.value;
         }
+        if (eventData.inputType) details.inputType = eventData.inputType;
         if (eventData.selectedText) {
           details.selectedText = eventData.selectedText;
         }
+
+        // Validation metadata
+        if (eventData.validity) details.validity = eventData.validity;
+        if (eventData.validationMessage) details.validationMessage = eventData.validationMessage;
+        if (eventData.required !== undefined) details.required = eventData.required;
+        if (eventData.pattern) details.pattern = eventData.pattern;
+
+        // Form metadata
+        if (eventData.formId) details.formId = eventData.formId;
+        if (eventData.formAction) details.formAction = eventData.formAction;
+        if (eventData.formMethod) details.formMethod = eventData.formMethod;
+
+        // Event modifiers
+        if (eventData.modifierKeys) details.modifierKeys = eventData.modifierKeys;
+        if (eventData.button !== undefined) details.button = eventData.button;
 
         // Add text content if different from semantic label (useful for automation)
         if (eventData.text && eventData.text !== semanticLabel) {
@@ -263,7 +328,78 @@ export class EventRecorder extends EventEmitter {
             return elementTypes[target.tagName] || 'elemento';
           }
 
-          function captureEvent(type, target) {
+          function getXPath(element) {
+            if (element.id) {
+              return \`//*[@id="\${element.id}"]\`;
+            }
+            
+            const parts = [];
+            let current = element;
+            
+            while (current && current.nodeType === Node.ELEMENT_NODE) {
+              let index = 0;
+              let sibling = current.previousSibling;
+              
+              while (sibling) {
+                if (sibling.nodeType === Node.ELEMENT_NODE && sibling.nodeName === current.nodeName) {
+                  index++;
+                }
+                sibling = sibling.previousSibling;
+              }
+              
+              const tagName = current.nodeName.toLowerCase();
+              const pathIndex = index > 0 ? \`[\${index + 1}]\` : '';
+              parts.unshift(tagName + pathIndex);
+              
+              current = current.parentNode;
+            }
+            
+            return parts.length ? '/' + parts.join('/') : '';
+          }
+          
+          function getCssPath(element) {
+            if (element.id) {
+              return \`#\${element.id}\`;
+            }
+            
+            const path = [];
+            let current = element;
+            
+            while (current && current.nodeType === Node.ELEMENT_NODE) {
+              let selector = current.nodeName.toLowerCase();
+              
+              if (current.className && typeof current.className === 'string') {
+                const classes = current.className.trim().split(/\\s+/).filter(c => c);
+                if (classes.length > 0) {
+                  selector += '.' + classes.join('.');
+                }
+              }
+              
+              // Add nth-child if needed for uniqueness
+              let sibling = current;
+              let nth = 1;
+              while (sibling.previousElementSibling) {
+                sibling = sibling.previousElementSibling;
+                if (sibling.nodeName === current.nodeName) nth++;
+              }
+              
+              if (nth > 1 || current.nextElementSibling) {
+                selector += \`:nth-child(\${nth})\`;
+              }
+              
+              path.unshift(selector);
+              current = current.parentElement;
+              
+              // Stop at body or if we have enough specificity
+              if (!current || current.nodeName === 'BODY' || path.length > 5) {
+                break;
+              }
+            }
+            
+            return path.join(' > ');
+          }
+
+          function captureEvent(type, target, event) {
             if (!target) return;
             
             const semanticLabel = generateSemanticLabel(target);
@@ -277,10 +413,84 @@ export class EventRecorder extends EventEmitter {
               text: target.textContent ? target.textContent.substring(0, 100).trim() : undefined,
             };
             
-            // Capturar el valor real de inputs y textareas
+            // === SELECTORES ROBUSTOS ===
+            eventData.xpath = getXPath(target);
+            eventData.cssPath = getCssPath(target);
+            
+            const role = target.getAttribute('role') || target.getAttribute('aria-role');
+            if (role) {
+              eventData.roleSelector = \`[role="\${role}"]\`;
+            }
+            
+            // === CONTEXTO DEL DOM ===
+            if (target.parentElement) {
+              eventData.parentElement = {
+                tagName: target.parentElement.tagName,
+                id: target.parentElement.id || undefined,
+                classes: target.parentElement.className ? 
+                  target.parentElement.className.trim().split(/\\s+/).filter(c => c) : []
+              };
+            }
+            
+            // Classes del elemento
+            if (target.className && typeof target.className === 'string') {
+              eventData.classes = target.className.trim().split(/\\s+/).filter(c => c);
+            }
+            
+            // Atributos relevantes
+            const relevantAttrs = ['role', 'name', 'type', 'href', 'src', 'alt', 'title', 
+                                   'placeholder', 'aria-label', 'aria-describedby', 'aria-required'];
+            const attributes = {};
+            relevantAttrs.forEach(attr => {
+              const value = target.getAttribute(attr);
+              if (value) attributes[attr] = value;
+            });
+            if (Object.keys(attributes).length > 0) {
+              eventData.attributes = attributes;
+            }
+            
+            // === ESTADO DEL ELEMENTO ===
+            if (target.disabled !== undefined) {
+              eventData.disabled = target.disabled;
+            }
+            if (target.type === 'checkbox' || target.type === 'radio') {
+              eventData.checked = target.checked;
+            }
+            if (target.readOnly !== undefined) {
+              eventData.readonly = target.readOnly;
+            }
+            eventData.focused = document.activeElement === target;
+            
+            // === VALORES DE INPUT ===
             if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
               eventData.value = target.value;
               eventData.inputType = target.type || 'text';
+              
+              // Validación de formularios
+              if (target.validity) {
+                eventData.validity = {
+                  valid: target.validity.valid,
+                  valueMissing: target.validity.valueMissing,
+                  typeMismatch: target.validity.typeMismatch,
+                  patternMismatch: target.validity.patternMismatch,
+                  tooLong: target.validity.tooLong,
+                  tooShort: target.validity.tooShort,
+                  rangeUnderflow: target.validity.rangeUnderflow,
+                  rangeOverflow: target.validity.rangeOverflow,
+                  stepMismatch: target.validity.stepMismatch,
+                  badInput: target.validity.badInput,
+                  customError: target.validity.customError
+                };
+              }
+              if (target.validationMessage) {
+                eventData.validationMessage = target.validationMessage;
+              }
+              if (target.required !== undefined) {
+                eventData.required = target.required;
+              }
+              if (target.pattern) {
+                eventData.pattern = target.pattern;
+              }
             }
             
             // Para selects, capturar la opción seleccionada
@@ -289,21 +499,44 @@ export class EventRecorder extends EventEmitter {
               eventData.selectedText = target.options[target.selectedIndex]?.text;
             }
             
+            // === INFORMACIÓN DE FORMULARIO ===
+            const form = target.closest('form');
+            if (form) {
+              eventData.formId = form.id || undefined;
+              eventData.formAction = form.action || undefined;
+              eventData.formMethod = form.method || undefined;
+            }
+            
+            // === MODIFICADORES DE EVENTO ===
+            if (event) {
+              eventData.modifierKeys = {
+                ctrl: event.ctrlKey || false,
+                shift: event.shiftKey || false,
+                alt: event.altKey || false,
+                meta: event.metaKey || false
+              };
+              
+              // Para clicks, capturar botón del mouse
+              if (type === 'click' && event.button !== undefined) {
+                eventData.button = event.button; // 0=left, 1=middle, 2=right
+              }
+            }
+            
             if (typeof window.__qaEventCapture === 'function') {
               window.__qaEventCapture(eventData);
             }
           }
 
           document.addEventListener('click', function(e) {
-            captureEvent('click', e.target);
+            captureEvent('click', e.target, e);
           }, true);
 
           document.addEventListener('input', function(e) {
-            captureEvent('input', e.target);
+            captureEvent('input', e.target, e);
           }, true);
 
           document.addEventListener('change', function(e) {
-            captureEvent('change', e.target);
+            captureEvent('change', e.target, e);
           }, true);
         })();
       `;
@@ -368,9 +601,8 @@ export class EventRecorder extends EventEmitter {
       });
 
       // Save screenshot to file with timestamp for ordering
-      // Use centralized function to get session directory name
-      const sessionDirName = getSessionDirName(this.sessionId, this.createdAt);
-      const sessionDir = join(config.sessionsDir, sessionDirName);
+      // Use session context for directory path
+      const sessionDir = this.sessionContext.sessionDir;
       // Ensure directory exists (should already exist from playwright, but ensure it)
       await fs.mkdir(sessionDir, { recursive: true });
 
@@ -471,4 +703,3 @@ export class EventRecorder extends EventEmitter {
     this.events = [];
   }
 }
-

@@ -1,8 +1,10 @@
 import { promises as fs } from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { config } from '../config.js';
+import { config, getSessionDirName } from '../config.js';
 import { Credential, CreateCredentialDto, UpdateCredentialDto } from '../types/credentials.js';
 import { PlaywrightService } from './playwright.js';
+import { SessionContext } from '../types/index.js';
+import { join } from 'path';
 
 export class CredentialsService {
     private static instance: CredentialsService;
@@ -79,6 +81,20 @@ export class CredentialsService {
 
         // Launch browser for manual login
         try {
+            // Create temporary session context for auth capture
+            const sessionId = `auth_${id}`;
+            const createdAt = new Date().toISOString();
+            const sessionDirName = getSessionDirName(sessionId, createdAt);
+            const sessionDir = join(config.sessionsDir, sessionDirName);
+            
+            const tempContext: SessionContext = {
+                sessionId,
+                sessionsDir: config.sessionsDir,
+                sessionDirName,
+                sessionDir,
+                createdAt,
+            };
+            
             const result = await this.playwrightService.launchBrowser({
                 recordActions: false,
                 recordConsole: false,
@@ -86,7 +102,7 @@ export class CredentialsService {
                 recordVideo: false,
                 initialUrl: credential.targetUrl,
                 resolution: 'HD'
-            }, `auth_${id}`);
+            }, tempContext);
 
             // Wait for the user to close the browser
             // We'll use a promise that resolves when the page or browser is closed

@@ -1,6 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+// @ts-ignore - react-window types have issues
+import { VariableSizeList } from 'react-window';
+// @ts-ignore - autosizer types have issues  
+import AutoSizer from 'react-virtualized-auto-sizer';
 import { QAEvent, EventType } from '../../types';
 import { isServerLogError } from '../../src/utils/eventHelpers';
+import { processEvents, ProcessedEvent } from '../../src/utils/eventProcessing';
 import {
   Globe, Terminal, MousePointer2, RefreshCw,
   Camera, Flag, Bug, Navigation, Server,
@@ -51,32 +56,114 @@ export const TimelineMatrix: React.FC<TimelineMatrixProps> = ({
   autoScroll = true
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
+  const [showResumeFeed, setShowResumeFeed] = useState(false);
+  const resumeFeedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [lastSeenEventIndex, setLastSeenEventIndex] = useState(0);
 
-  // Handle Scroll Logic to detect if user moved up
-  const handleScroll = () => {
-    if (!scrollRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+  // Pre-process events for better performance
+  const processedEvents = React.useMemo(() => {
+    const processed = processEvents(events);
+    return processed;
+  }, [events]);
 
-    // Tolerance of 50px to consider "at bottom"
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
-    setIsUserAtBottom(isAtBottom);
-  };
+  // 🔧 PERFORMANCE FIX: Limit rendered events to prevent DOM explosion
+  const MAX_RENDERED_EVENTS = 500;
+  const eventsToRender = processedEvents.length > MAX_RENDERED_EVENTS
+    ? processedEvents.slice(-MAX_RENDERED_EVENTS)
+    : processedEvents;
+  const hasHiddenEvents = processedEvents.length > MAX_RENDERED_EVENTS;
+
+  // 🔧 ROBUST FIX: Detect manual scroll UP using wheel event
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const handleWheelUp = (e: WheelEvent) => {
+      if (e.deltaY < 0) { // Scroll hacia arriba = usuario quiere subir
+        setIsUserAtBottom(false);
+      }
+    };
+
+    container.addEventListener('wheel', handleWheelUp, { passive: true });
+    return () => container.removeEventListener('wheel', handleWheelUp);
+  }, []);
+
+  // Use IntersectionObserver ONLY to detect arriving at bottom
+  // 🔧 SIMPLIFIED: No flags, no race conditions
+  useEffect(() => {
+    const sentinel = bottomSentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !isUserAtBottom) {
+          // User arrived at bottom (by scroll or by clicking Resume Feed)
+          setIsUserAtBottom(true);
+          setLastSeenEventIndex(events.length);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [events.length, isUserAtBottom]);
 
   // Auto-scroll effect: Only scroll if user was already at bottom
+  // 🔧 SIMPLIFIED: No flags needed, wheel event prevents false positives
   useEffect(() => {
     if (autoScroll && isUserAtBottom && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [events, autoScroll, isUserAtBottom]);
 
-  const scrollToBottom = () => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-      setIsUserAtBottom(true);
+  // Delayed "Resume Live Feed" button logic
+  useEffect(() => {
+    if (isUserAtBottom) {
+      // User is at bottom, hide button immediately
+      if (resumeFeedTimeoutRef.current) {
+        clearTimeout(resumeFeedTimeoutRef.current);
+        resumeFeedTimeoutRef.current = null;
+      }
+      setShowResumeFeed(false);
+    } else {
+      // User scrolled up, wait 2 seconds before showing button
+      // Clear existing timer and start new one
+      if (resumeFeedTimeoutRef.current) {
+        clearTimeout(resumeFeedTimeoutRef.current);
+      }
+
+      resumeFeedTimeoutRef.current = setTimeout(() => {
+        setShowResumeFeed(true);
+      }, 2000);
     }
-  };
+
+    return () => {
+      if (resumeFeedTimeoutRef.current) {
+        clearTimeout(resumeFeedTimeoutRef.current);
+      }
+    };
+  }, [isUserAtBottom, events.length, lastSeenEventIndex]);
+
+  const scrollToBottom = useCallback(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: 'auto'
+      });
+
+      setIsUserAtBottom(true);
+      setShowResumeFeed(false);
+      setLastSeenEventIndex(events.length);
+    }
+  }, [events.length]);
+
+
+
+
 
   const handleRowClick = (event: QAEvent) => {
     if (!event.details) return;
@@ -142,7 +229,6 @@ export const TimelineMatrix: React.FC<TimelineMatrixProps> = ({
       {/* Matrix Body - Scrollable */}
       <div
         ref={scrollRef}
-        onScroll={handleScroll}
         className="flex-1 overflow-y-auto overflow-x-hidden relative scrollbar-thin bg-zinc-950"
       >
         {/* Content Wrapper for correct sizing of absolute mesh */}
@@ -167,20 +253,27 @@ export const TimelineMatrix: React.FC<TimelineMatrixProps> = ({
               </div>
             )}
 
-            {events.map((event) => {
-              const trackIndex = getTrackForEvent(event.type);
+            {/* 🔧 PERFORMANCE: Hidden events indicator */}
+            {hasHiddenEvents && (
+              <div className="sticky top-0 z-30 bg-amber-900/20 border-b border-amber-700/50 px-4 py-2 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                <span className="text-xs font-mono text-amber-400">
+                  Showing last {MAX_RENDERED_EVENTS} of {processedEvents.length} events for performance
+                </span>
+              </div>
+            )}
+
+
+
+            {eventsToRender.map((event) => {
               const isActive = activeEventId === event.id;
               const hasDetails = !!event.details;
 
-              const isNetworkError = event.type === EventType.NETWORK && /^(4|5)\d{2}/.test(event.message);
-              const isConsoleError = event.type === EventType.CONSOLE && event.message.toLowerCase().startsWith('console error');
-              const isServerError = isServerLogError(event);
-              const isBug = event.type === EventType.BUG;
-              const isErrorState = isNetworkError || isConsoleError || isServerError || isBug;
-
-              const date = new Date(event.timestamp);
-              const timeStr = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
-              const msStr = date.getMilliseconds().toString().padStart(3, '0');
+              // Use pre-computed properties
+              const trackIndex = event._trackIndex;
+              const isErrorState = event._isError;
+              const timeStr = event._timeStr;
+              const msStr = event._msStr;
 
               return (
                 <div key={event.id} className="group relative z-10">
@@ -263,11 +356,14 @@ export const TimelineMatrix: React.FC<TimelineMatrixProps> = ({
               );
             })}
           </div>
+
+          {/* Bottom Sentinel for IntersectionObserver */}
+          <div ref={bottomSentinelRef} className="h-1" />
         </div>
       </div>
 
       {/* Resume Auto-Scroll Button */}
-      {!isUserAtBottom && events.length > 0 && (
+      {showResumeFeed && events.length > 0 && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 animate-in fade-in slide-in-from-bottom-2">
           <button
             onClick={scrollToBottom}
@@ -275,6 +371,11 @@ export const TimelineMatrix: React.FC<TimelineMatrixProps> = ({
           >
             <ArrowDown size={14} className="animate-bounce" />
             Resume Live Feed
+            {events.length > lastSeenEventIndex && (
+              <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
+                +{events.length - lastSeenEventIndex} new
+              </span>
+            )}
           </button>
         </div>
       )}

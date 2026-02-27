@@ -6,6 +6,8 @@ import {
 import { isServerLogError } from '../../src/utils/eventHelpers';
 import { api } from '../../src/services/api';
 import { generateQaReport } from '../../src/services/qaReport';
+import { useWorkspace } from '../../WorkspaceContext';
+import { buildSessionVideoUrl, buildSessionFileUrl } from '../../src/services/backendUrls';
 
 import { ReplayHeader } from '../replay/ReplayHeader';
 import { ReplayViewer } from '../replay/ReplayViewer';
@@ -14,11 +16,10 @@ import { ReplayConsole } from '../replay/ReplayConsole';
 import { ReplaySidebar } from '../replay/ReplaySidebar';
 import { Button } from '../ui/Button';
 
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3001';
-
 export const SessionReplay: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { workspaceHash } = useWorkspace();
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -37,7 +38,7 @@ export const SessionReplay: React.FC = () => {
   // UI state
   const [viewMode, setViewMode] = useState<'video' | 'screenshots' | 'analysis'>('video');
   const [activeEventId, setActiveEventId] = useState<string | null>(null);
-  const [currentScreenshotIdx, setCurrentScreenshotIdx] = useState(0);
+
 
   // Filtering & Search
   const [searchTerm, setSearchTerm] = useState('');
@@ -65,7 +66,7 @@ export const SessionReplay: React.FC = () => {
     const loadSession = async () => {
       try {
         setIsLoading(true);
-        const data = await api.getSession(id);
+        const data = await api.getSession(id, workspaceHash);
         const sortedEvents = [...data.events].sort((a, b) =>
           new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         );
@@ -83,15 +84,14 @@ export const SessionReplay: React.FC = () => {
       }
     };
     loadSession();
-  }, [id]);
+  }, [id, workspaceHash]);
 
   // --- COMPUTED VALUES ---
   const hasVideo = session?.config?.recordVideo === true;
 
   const videoUrl = useMemo(() => {
     if (!hasVideo || !id) return null;
-    const filename = session?.videoFilename || 'video.webm';
-    return `${API_BASE_URL}/api/sessions/${id}/files/${filename}`;
+    return buildSessionVideoUrl(id, { absolute: false });
   }, [hasVideo, id, session?.videoFilename]);
 
   const duration = useMemo(() => {
@@ -113,21 +113,36 @@ export const SessionReplay: React.FC = () => {
 
   const screenshots = useMemo(() => sessionEvents.filter(e => e.type === EventType.SCREENSHOT), [sessionEvents]);
 
-  // --- FILTERING LOGIC ---
+  // Create activeScreenshotIdx derived from currentTime
+  const activeScreenshotIdx = useMemo(() => {
+    if (!session || screenshots.length === 0) return -1;
+    // Find last screenshot with timestamp <= currentTime
+    const currentAbsTime = session.startTime + currentTime;
+
+    // We iterate from end to find the last one <= current time
+    for (let i = screenshots.length - 1; i >= 0; i--) {
+      const sTime = new Date(screenshots[i].timestamp).getTime();
+      if (sTime <= currentAbsTime) {
+        return i;
+      }
+    }
+    return -1; // Before first screenshot
+  }, [currentTime, screenshots, session]);
   const effectiveFilters = useMemo(() => {
     const filters = [...activeFilters];
     if (previewFilter && previewFilter.property) filters.push(previewFilter as ActiveFilter);
     return filters;
   }, [activeFilters, previewFilter]);
 
-  const filteredEvents = useMemo(() => {
-    let list = sessionEvents;
-    if (!showHidden) list = list.filter(e => !e.isPruned);
-    if (searchTerm) {
-      const lower = searchTerm.toLowerCase();
+  // Helper function to apply filters to a list of events
+  const applyFiltersToEvents = useCallback((events: QAEvent[], filters: ActiveFilter[], hidePruned: boolean, search: string): QAEvent[] => {
+    let list = events;
+    if (hidePruned) list = list.filter(e => !e.isPruned);
+    if (search) {
+      const lower = search.toLowerCase();
       list = list.filter(e => e.message.toLowerCase().includes(lower) || e.type.toLowerCase().includes(lower) || e.details?.toLowerCase().includes(lower));
     }
-    if (effectiveFilters.length > 0) {
+    if (filters.length > 0) {
       list = list.filter(e => {
         const checkFilter = (filter: ActiveFilter) => {
           let targetValue = '';
@@ -166,9 +181,9 @@ export const SessionReplay: React.FC = () => {
             default: return true;
           }
         };
-        let match = checkFilter(effectiveFilters[0]);
-        for (let i = 1; i < effectiveFilters.length; i++) {
-          const f = effectiveFilters[i];
+        let match = checkFilter(filters[0]);
+        for (let i = 1; i < filters.length; i++) {
+          const f = filters[i];
           const currentMatch = checkFilter(f);
           if (f.logic === 'OR') match = match || currentMatch;
           else match = match && currentMatch;
@@ -177,7 +192,11 @@ export const SessionReplay: React.FC = () => {
       });
     }
     return list;
-  }, [sessionEvents, searchTerm, showHidden, effectiveFilters]);
+  }, []);
+
+  const filteredEvents = useMemo(() => {
+    return applyFiltersToEvents(sessionEvents, effectiveFilters, !showHidden, searchTerm);
+  }, [sessionEvents, searchTerm, showHidden, effectiveFilters, applyFiltersToEvents]);
 
   // --- TIMELINE MARKER LOGIC ---
   const eventMarkers = useMemo(() => {
@@ -252,9 +271,31 @@ export const SessionReplay: React.FC = () => {
       const timestamp = session.startTime + currentTime;
       let newEvent: QAEvent;
       if (type === EventType.SCREENSHOT) {
-        newEvent = await api.captureScreenshot(id, undefined, timestamp);
+        // Determine if this is an active session or replay
+        const isActiveSession = session.status === 'recording';
+        let imageData: string | undefined;
+
+        if (!isActiveSession && videoRef.current && videoUrl) {
+          // Replay mode: capture from video
+          try {
+            const video = videoRef.current;
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              imageData = canvas.toDataURL('image/png');
+            }
+          } catch (captureError) {
+            console.error('Error capturing video frame:', captureError);
+          }
+        }
+        // For active sessions, imageData will be undefined and backend will capture from browser
+        // For replay sessions, imageData will contain the video frame
+        newEvent = await api.captureScreenshot(id, imageData, timestamp, workspaceHash);
       } else if (type === EventType.NOTE || type === EventType.BUG || type === EventType.FLAG) {
-        newEvent = await api.addNote(id, message, type as any, timestamp);
+        newEvent = await api.addNote(id, message, type as any, timestamp, workspaceHash);
       } else {
         // Local fallback for other types if no dedicated API
         newEvent = { id: Math.random().toString(36).substr(2, 9), type, message, timestamp: new Date(timestamp).toISOString() };
@@ -277,8 +318,19 @@ export const SessionReplay: React.FC = () => {
         reportContent = await api.generateQaReport(id, {
           filteredEvents: filteredEvents,
           activeFilters: Array.from(new Set(filteredEvents.map(e => e.type))),
-          screenshots: screenshots.map(s => ({ url: `${API_BASE_URL}/api/sessions/${id}/files/${JSON.parse(s.details || '{}').filename}`, timestamp: s.timestamp }))
-        });
+          screenshots: screenshots.map(s => {
+            try {
+              const details = JSON.parse(s.details || '{}');
+              const filename = details.filename;
+              if (filename) {
+                return { url: buildSessionFileUrl(id, filename, { absolute: true }), timestamp: s.timestamp };
+              }
+            } catch (e) {
+              console.error('Error parsing screenshot details:', e);
+            }
+            return null;
+          }).filter(Boolean)
+        }, workspaceHash);
       } else {
         // Mock or use other generators if available
         await new Promise(r => setTimeout(r, 1500));
@@ -304,13 +356,31 @@ export const SessionReplay: React.FC = () => {
   const handleExportContext = async () => {
     if (!id) return;
     try {
-      // Extract unique event types from filtered events to respect active filters
-      const eventTypes = Array.from(new Set(filteredEvents.map(e => e.type))) as EventType[];
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SessionReplay.tsx:345',message:'handleExportContext called',data:{sessionId:id,activeFiltersCount:activeFilters.length,effectiveFiltersCount:effectiveFilters.length,filteredEventsCount:filteredEvents.length,sessionEventsCount:sessionEvents.length,hasORFilter:effectiveFilters.some(f=>f.logic==='OR'),activeFilters:JSON.stringify(activeFilters),effectiveFilters:JSON.stringify(effectiveFilters)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
+      // Reload session from backend to ensure we have the latest events (in case some were deleted)
+      const latestSession = await api.getSession(id, workspaceHash);
+      const sortedLatestEvents = [...latestSession.events].sort((a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+      
+      // Recalculate filtered events using the latest session data and current filters
+      const latestFilteredEvents = applyFiltersToEvents(sortedLatestEvents, effectiveFilters, !showHidden, searchTerm);
+      const filteredEventIds = latestFilteredEvents.map(e => e.id);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SessionReplay.tsx:365',message:'filteredEventIds calculated after sync',data:{originalFilteredEventsCount:filteredEvents.length,latestFilteredEventsCount:latestFilteredEvents.length,filteredEventIdsCount:filteredEventIds.length,latestSessionEventsCount:latestSession.events.length,firstFewIds:filteredEventIds.slice(0,10),willSendEventIds:filteredEventIds.length < latestSession.events.length,filteredEventTypes:Array.from(new Set(latestFilteredEvents.map(e=>e.type)))},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      
+      const eventIdsToSend = filteredEventIds.length < latestSession.events.length ? filteredEventIds : undefined;
+      // #region agent log
+      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SessionReplay.tsx:361',message:'eventIdsToSend determined',data:{eventIdsToSend:eventIdsToSend ? eventIdsToSend.length : 'undefined',firstFewIds:eventIdsToSend ? eventIdsToSend.slice(0,10) : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
 
-      // Only pass filters if they're actually filtering (not showing all events)
-      const filters = eventTypes.length < sessionEvents.length ? eventTypes : undefined;
+      const { blob, filename } = await api.exportSessionContext(id, eventIdsToSend, workspaceHash);
 
-      const { blob, filename } = await api.exportSessionContext(id, filters);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -327,7 +397,7 @@ export const SessionReplay: React.FC = () => {
   const handleDelete = async () => {
     if (!id || !window.confirm("Are you sure you want to delete this session?")) return;
     try {
-      await api.deleteSession(id);
+      await api.deleteSession(id, workspaceHash);
       navigate('/');
     } catch (error) {
       console.error('Failed to delete session:', error);
@@ -351,13 +421,46 @@ export const SessionReplay: React.FC = () => {
             viewMode={viewMode}
             setViewMode={setViewMode}
             screenshots={screenshots}
-            currentScreenshotIdx={currentScreenshotIdx}
-            onPrevScreenshot={() => setCurrentScreenshotIdx(prev => (prev - 1 + screenshots.length) % screenshots.length)}
-            onNextScreenshot={() => setCurrentScreenshotIdx(prev => (prev + 1) % screenshots.length)}
+            currentScreenshotIdx={activeScreenshotIdx}
+            onPrevScreenshot={() => {
+              if (!session || screenshots.length === 0) return;
+              const currentAbsTime = session.startTime + currentTime;
+
+              // Find the closest screenshot strictly before the current time (with small buffer)
+              // If we are "at" a screenshot, we want the one before it.
+              // If we are "between", we generally flip between the current "active" start and the one before.
+
+              // Simple approach: Find last screenshot with timestamp < currentAbsTime - 100ms
+              const target = screenshots.slice().reverse().find(s => new Date(s.timestamp).getTime() < currentAbsTime - 100);
+
+              if (target) {
+                setCurrentTime(new Date(target.timestamp).getTime() - session.startTime);
+              } else if (screenshots.length > 0) {
+                // If no previous screenshot found, maybe jump to start of the first one if we are past it?
+                const firstTime = new Date(screenshots[0].timestamp).getTime();
+                if (currentAbsTime > firstTime + 100) {
+                  setCurrentTime(firstTime - session.startTime);
+                } else {
+                  setCurrentTime(0); // Go to beginning of session
+                }
+              }
+            }}
+            onNextScreenshot={() => {
+              if (!session || screenshots.length === 0) return;
+              const currentAbsTime = session.startTime + currentTime;
+
+              // Find first screenshot strictly after current time + small buffer
+              const target = screenshots.find(s => new Date(s.timestamp).getTime() > currentAbsTime + 100);
+
+              if (target) {
+                setCurrentTime(new Date(target.timestamp).getTime() - session.startTime);
+              }
+            }}
             onManualCapture={() => handleAddNewEvent(EventType.SCREENSHOT, "Manual Screenshot Capture")}
             isPlaying={isPlaying}
             togglePlay={togglePlay}
             sessionEvents={sessionEvents}
+            sessionId={id!}
             docData={docData}
             setDocData={setDocData}
             isGenerating={isGenerating}
@@ -381,14 +484,14 @@ export const SessionReplay: React.FC = () => {
           searchTerm={searchTerm} setSearchTerm={setSearchTerm} activeFilters={activeFilters} setActiveFilters={setActiveFilters}
           onPreviewFilter={setPreviewFilter} filteredEvents={filteredEvents} activeEventId={activeEventId} autoScroll={autoScroll}
           setAutoScroll={setAutoScroll} showHidden={showHidden} setShowHidden={setShowHidden} onEventsChange={setSessionEvents}
+          sessionId={id!}
           onEventClick={(e) => {
             const offset = (new Date(e.timestamp).getTime() - session!.startTime);
             setCurrentTime(offset);
             setActiveEventId(e.id);
             if (e.type === EventType.SCREENSHOT) {
               setViewMode('screenshots');
-              const idx = screenshots.findIndex(s => s.id === e.id);
-              if (idx !== -1) setCurrentScreenshotIdx(idx);
+              // No need to set index manually anymore, currentTime updates it
             } else setViewMode('video');
           }}
         />

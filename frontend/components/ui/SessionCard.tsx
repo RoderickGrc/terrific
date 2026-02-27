@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Session } from '../../types';
 import { Card } from './Card';
 import { Badge } from './Badge';
+import { useWorkspace } from '../../WorkspaceContext';
 
 interface SessionCardProps {
     session: Session;
@@ -11,6 +12,7 @@ interface SessionCardProps {
 }
 
 export const SessionCard: React.FC<SessionCardProps> = ({ session, onClick, onDelete, onUpdate }) => {
+    const { workspaceHash } = useWorkspace();
     const [isEditing, setIsEditing] = useState(false);
     const [editedName, setEditedName] = useState(session.name || '');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -81,7 +83,7 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session, onClick, onDe
         setIsUpdating(true);
         try {
             const { api } = await import('../../src/services/api');
-            await api.updateSessionName(session.id, editedName);
+            await api.updateSessionName(session.id, editedName, workspaceHash);
             if (onUpdate) {
                 await onUpdate();
             }

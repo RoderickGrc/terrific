@@ -1,17 +1,1 @@
-{
-  "workspaces": {
-    "kjq0qfno": {
-      "id": "kjq0qfno",
-      "path": "D:\\Obelysk\\obelysk-website\\.terrific",
-      "createdAt": "2026-01-29T20:31:37.150Z",
-      "lastAccessedAt": "2026-01-30T02:58:59.253Z"
-    },
-    "xi36il5g": {
-      "id": "xi36il5g",
-      "path": "D:\\Proyectos\\haiku-questioner\\.terrific",
-      "createdAt": "2026-01-31T17:04:39.853Z",
-      "lastAccessedAt": "2026-01-31T21:31:21.543Z"
-    }
-  },
-  "defaultWorkspace": null
-}
+{"workspaces":{"default":{"id":"default","path":"C:\\Projects\\my-app\\.terrific","createdAt":"2026-01-01T00:00:00.000Z","lastAccessedAt":"2026-01-01T00:00:00.000Z"}},"defaultWorkspace":null}

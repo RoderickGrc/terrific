@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { QAEvent } from '../../types';
 
-const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:4568';
 
-export function useWebSocket(sessionId: string | null, onEvent?: (event: QAEvent) => void) {
+export function useWebSocket(sessionId: string | null, workspaceHash?: string | null, onEvent?: (event: QAEvent) => void) {
   const [isConnected, setIsConnected] = useState(false);
   const [events, setEvents] = useState<QAEvent[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
@@ -16,14 +16,19 @@ export function useWebSocket(sessionId: string | null, onEvent?: (event: QAEvent
     }
 
     try {
-      const wsUrl = `${WS_BASE_URL}?sessionId=${sessionId}`;
+      // Build URL with workspace hash if provided
+      const urlParams = new URLSearchParams({ sessionId });
+      if (workspaceHash) {
+        urlParams.append('workspace', workspaceHash);
+      }
+      const wsUrl = `${WS_BASE_URL}?${urlParams.toString()}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setIsConnected(true);
         reconnectAttempts.current = 0;
-        console.log('WebSocket connected');
+        console.log('WebSocket connected', { sessionId, workspaceHash });
       };
 
       ws.onmessage = (message) => {
@@ -65,11 +70,11 @@ export function useWebSocket(sessionId: string | null, onEvent?: (event: QAEvent
     } catch (error) {
       console.error('Error creating WebSocket connection:', error);
     }
-  }, [sessionId, onEvent]);
+  }, [sessionId, workspaceHash, onEvent]);
 
   useEffect(() => {
     if (!sessionId) return;
-    
+
     connect();
 
     return () => {
@@ -81,7 +86,7 @@ export function useWebSocket(sessionId: string | null, onEvent?: (event: QAEvent
         wsRef.current = null;
       }
     };
-  }, [sessionId]); // Only depend on sessionId, not connect function
+  }, [sessionId, workspaceHash]); // Include workspaceHash in dependencies
 
   const sendMessage = useCallback((message: string) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {

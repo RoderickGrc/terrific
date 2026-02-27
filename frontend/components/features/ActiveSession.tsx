@@ -2,17 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Pause, Square, Camera, Terminal, Flag, Bug, Play,
-  AlertCircle, ChevronLeft, MessageSquare
+  AlertCircle, ChevronLeft, MessageSquare, Video
 } from 'lucide-react';
 import { QAEvent, EventType } from '../../types';
 import { TimelineMatrix } from './TimelineMatrix';
 import { Button } from '../ui/Button';
 import { useWebSocket } from '../../src/hooks/useWebSocket';
 import { api } from '../../src/services/api';
+import { ScreenCaptureService } from '../../src/services/screenCapture';
+import { useWorkspace } from '../../WorkspaceContext';
 
 export const ActiveSession: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { workspaceHash } = useWorkspace();
   const [isRecording, setIsRecording] = useState(true);
   const [events, setEvents] = useState<QAEvent[]>([]);
   const [note, setNote] = useState('');
@@ -21,38 +24,161 @@ export const ActiveSession: React.FC = () => {
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
   const [sessionType, setSessionType] = useState<'browser' | 'debug_gateway'>('browser');
+  const [recordingMode, setRecordingMode] = useState<'browser' | 'screen'>('browser');
+  const [isScreenCapturing, setIsScreenCapturing] = useState(false);
+  const screenCaptureRef = useRef<ScreenCaptureService | null>(null);
+  const screenCaptureStateRef = useRef<{
+    shouldStart: boolean;
+    waitingForFirstEvent: boolean;
+    hasStarted: boolean;
+  }>({
+    shouldStart: false,
+    waitingForFirstEvent: false,
+    hasStarted: false,
+  });
 
-  // Connect to WebSocket
-  const { isConnected, events: wsEvents } = useWebSocket(id || null);
+  // Connect to WebSocket with workspace hash
+  const { isConnected, events: wsEvents } = useWebSocket(id || null, workspaceHash);
 
-  // Fetch session config once to determine session type
+  // Fetch session config and start screen capture FIRST (before Playwright)
   useEffect(() => {
-    const fetchSessionConfig = async () => {
-      if (!id) return;
+    if (!id) return;
+    
+    // Use a more robust flag to prevent double execution
+    const state = screenCaptureStateRef.current;
+    if (state.hasStarted) {
+      console.log('[ActiveSession] Already started, skipping initialization');
+      return;
+    }
+    
+    // Mark as starting IMMEDIATELY to prevent concurrent executions
+    state.hasStarted = true;
+
+    const initializeSession = async () => {
       try {
-        const session = await api.getSession(id);
+        const session = await api.getSession(id, workspaceHash);
         setSessionType(session.config.sessionType || 'browser');
+        setRecordingMode(session.config.recordingMode || 'browser');
+        setSessionName(session.name || session.config?.name || '');
+
+        // For screen recording mode, start capture FIRST, then start browser
+        const shouldStart = session.config.recordVideo && session.config.recordingMode === 'screen';
+        if (shouldStart) {
+          state.shouldStart = true;
+          state.waitingForFirstEvent = false; // No longer waiting for events
+          
+          console.log('[ActiveSession] Starting screen capture FIRST (before Playwright)...');
+          
+          // #region agent log
+          fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ActiveSession.tsx:57',message:'[ORCHESTRATION] STARTING_RECORDING_FIRST',data:{sessionId:id},timestamp:Date.now(),sessionId:id,runId:'orchestration',hypothesisId:'ORCH'})}).catch(()=>{});
+          // #endregion
+          
+          try {
+            // Check if capture is already active
+            if (screenCaptureRef.current?.isRecording()) {
+              console.warn('[ActiveSession] Screen capture already active, skipping');
+              return;
+            }
+            
+            const captureService = new ScreenCaptureService();
+            screenCaptureRef.current = captureService;
+            await captureService.startCapture({ sessionId: id });
+            setIsScreenCapturing(true);
+            
+            // Get the actual recording start time for synchronization
+            const recordingStartTime = captureService.getStartTime();
+            
+            console.log('[ActiveSession] Screen capture started, now starting Playwright browser...');
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ActiveSession.tsx:72',message:'[ORCHESTRATION] RECORDING_STARTED_CALLING_START_BROWSER',data:{sessionId:id,recordingStartTime},timestamp:Date.now(),sessionId:id,runId:'orchestration',hypothesisId:'ORCH'})}).catch(()=>{});
+            // #endregion
+            
+            // Now start Playwright browser with recording start time for synchronization
+            await api.startBrowser(id, recordingStartTime, workspaceHash);
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ActiveSession.tsx:77',message:'[ORCHESTRATION] START_BROWSER_CALLED',data:{sessionId:id},timestamp:Date.now(),sessionId:id,runId:'orchestration',hypothesisId:'ORCH'})}).catch(()=>{});
+            // #endregion
+            
+            console.log('[ActiveSession] Browser start requested');
+          } catch (error) {
+            console.error('[ActiveSession] Failed to start screen capture or browser:', error);
+            // Reset flag on error so user can retry
+            state.hasStarted = false;
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            alert(`Failed to start screen recording: ${errorMessage}`);
+          }
+        } else {
+          // If not screen recording, reset the flag since we didn't start anything
+          state.hasStarted = false;
+        }
       } catch (error) {
-        console.error('Error fetching session config:', error);
+        console.error('[ActiveSession] Error fetching session config:', error);
+        // Reset flag on error
+        state.hasStarted = false;
       }
     };
-    fetchSessionConfig();
+
+    initializeSession();
   }, [id]);
+
+  // Stop screen capture
+  const stopScreenCapture = async () => {
+    if (screenCaptureRef.current) {
+      try {
+        await screenCaptureRef.current.stopCapture();
+        setIsScreenCapturing(false);
+        console.log('[ActiveSession] Screen capture stopped');
+      } catch (error) {
+        console.error('[ActiveSession] Error stopping screen capture:', error);
+      } finally {
+        // Cleanup
+        screenCaptureRef.current = null;
+        screenCaptureStateRef.current.hasStarted = false;
+      }
+    }
+  };
 
   // Sync WebSocket events to local state
   useEffect(() => {
     setEvents(wsEvents);
   }, [wsEvents]);
 
+  // Handle SESSION_STOPPED event - redirect to replay view
+  useEffect(() => {
+    const stoppedEvent = wsEvents.find(e => e.type === EventType.SESSION_STOPPED);
+    if (stoppedEvent) {
+      try {
+        const details = JSON.parse(stoppedEvent.details || '{}');
+        
+        // Use redirectTo from event if available (includes workspace context)
+        if (details.redirectTo) {
+          console.log('[ActiveSession] Session stopped, using redirectTo:', details.redirectTo);
+          navigate(details.redirectTo);
+        } else {
+          // Fallback: construct URL with workspace context using session.id
+          const redirectPath = workspaceHash
+            ? `/workspace/${workspaceHash}/replay/${id}`
+            : `/replay/${id}`;
+          console.log('[ActiveSession] Session stopped, redirecting to:', redirectPath);
+          navigate(redirectPath);
+        }
+      } catch (error) {
+        console.error('[ActiveSession] Error parsing SESSION_STOPPED event:', error);
+      }
+    }
+  }, [wsEvents, id, navigate, workspaceHash]);
+
   const handlePauseResume = async () => {
     if (!id) return;
     setIsLoading(true);
     try {
       if (isRecording) {
-        await api.pauseSession(id);
+        await api.pauseSession(id, workspaceHash);
         setIsRecording(false);
       } else {
-        await api.resumeSession(id);
+        await api.resumeSession(id, workspaceHash);
         setIsRecording(true);
       }
     } catch (error) {
@@ -67,7 +193,7 @@ export const ActiveSession: React.FC = () => {
     const message = note.trim() || (type === EventType.FLAG ? 'Flagged point of interest' : type === EventType.BUG ? 'Bug reported' : 'Note added');
     setIsLoading(true);
     try {
-      await api.addNote(id, message, type as any);
+      await api.addNote(id, message, type as any, undefined, workspaceHash);
       setNote('');
     } catch (error) {
       console.error('Error adding note:', error);
@@ -80,7 +206,7 @@ export const ActiveSession: React.FC = () => {
     if (!id) return;
     setIsLoading(true);
     try {
-      await api.captureScreenshot(id);
+      await api.captureScreenshot(id, undefined, undefined, workspaceHash);
     } catch (error) {
       console.error('Error capturing screenshot:', error);
     } finally {
@@ -92,7 +218,7 @@ export const ActiveSession: React.FC = () => {
     if (!id) return;
     setIsLoading(true);
     try {
-      await api.captureCrawl(id);
+      await api.captureCrawl(id, workspaceHash);
     } catch (error) {
       console.error('Error capturing crawl:', error);
     } finally {
@@ -104,12 +230,20 @@ export const ActiveSession: React.FC = () => {
     if (!id) return;
     setIsFinishing(true);
     try {
-      const result = await api.stopSession(id);
-      const savedSessionId = result.sessionDirName || id;
+      // Stop screen capture first if active
+      await stopScreenCapture();
+
+      const result = await api.stopSession(id, workspaceHash);
+      // Use session.id (UUID) for all operations and navigation
       if (sessionName.trim()) {
-        await api.updateSessionName(savedSessionId, sessionName.trim());
+        await api.updateSessionName(id, sessionName.trim(), workspaceHash);
       }
-      navigate(`/replay/${savedSessionId}`);
+
+      // Construct workspace-aware replay URL using session.id
+      const replayPath = workspaceHash
+        ? `/workspace/${workspaceHash}/replay/${id}`
+        : `/replay/${id}`;
+      navigate(replayPath);
     } catch (error) {
       console.error('Error stopping session:', error);
       setIsFinishing(false);
@@ -133,7 +267,11 @@ export const ActiveSession: React.FC = () => {
           </button>
           <div>
             <h1 className="text-[13px] font-bold text-white tracking-wide uppercase">
-              {sessionType === 'debug_gateway' ? 'DEBUG GATEWAY' : `SESSION #${id?.replace('new_', '').substring(0, 8)}`}
+              {sessionName.trim()
+                ? sessionName.trim()
+                : (sessionType === 'debug_gateway'
+                    ? 'DEBUG GATEWAY'
+                    : `SESSION #${id?.replace('new_', '').substring(0, 8)}`)}
             </h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className={`flex h-2 w-2 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-amber-500'}`} />
@@ -142,6 +280,11 @@ export const ActiveSession: React.FC = () => {
                   ? 'Logging Active'
                   : (isRecording ? 'Live Recording' : 'Paused')}
               </span>
+              {isScreenCapturing && (
+                <span className="text-[10px] font-mono text-red-400 ml-2 flex items-center gap-1">
+                  <Video size={10} className="animate-pulse" /> SCREEN REC
+                </span>
+              )}
               <span className="text-[10px] font-mono text-zinc-600 ml-2">{isConnected ? 'CONNECTED' : 'CONNECTING...'}</span>
             </div>
           </div>

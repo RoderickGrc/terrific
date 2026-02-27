@@ -8,14 +8,40 @@ import { AI_DEBUG_PROMPT } from '../../src/constants';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { api } from '../../src/services/api';
+import { useWorkspace } from '../../WorkspaceContext';
+
+const DEBUG_GATEWAY_STORAGE_KEY = 'debug_gateway_enabled';
 
 export const DebugServerPanel: React.FC = () => {
   const navigate = useNavigate();
+  const { workspaceHash } = useWorkspace();
   const [isEnabled, setIsEnabled] = useState(false);
   const [showContract, setShowContract] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'listening' | 'connected'>('disconnected');
+  const [serverUrl, setServerUrl] = useState<string>("http://localhost:4567/api/sessions/ingest");
+
+  // Load state from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(DEBUG_GATEWAY_STORAGE_KEY);
+    if (saved === 'true') {
+      setIsEnabled(true);
+    }
+  }, []);
+
+  // Fetch server info on mount
+  useEffect(() => {
+    const fetchServerInfo = async () => {
+      try {
+        const info = await api.getServerInfo(workspaceHash);
+        setServerUrl(`${info.url}/api/sessions/ingest`);
+      } catch (error) {
+        console.error('Failed to fetch server info:', error);
+      }
+    };
+    fetchServerInfo();
+  }, [workspaceHash]);
 
   // Simulate connection listening state
   useEffect(() => {
@@ -39,7 +65,7 @@ export const DebugServerPanel: React.FC = () => {
   };
 
   const handleCopyUrl = () => {
-    navigator.clipboard.writeText("http://localhost:3001/api/ingest");
+    navigator.clipboard.writeText(serverUrl);
   };
 
   const handleStartDebugSession = async () => {
@@ -53,7 +79,7 @@ export const DebugServerPanel: React.FC = () => {
         recordConsole: false,
         recordNetwork: false,
         recordVideo: false,
-      });
+      }, workspaceHash);
       navigate(`/session/${session.id}`);
     } catch (error) {
       console.error('Error starting debug session:', error);
@@ -87,7 +113,11 @@ export const DebugServerPanel: React.FC = () => {
 
         {/* Toggle Switch - Monochromatic Style */}
         <button
-          onClick={() => setIsEnabled(!isEnabled)}
+          onClick={() => {
+            const newState = !isEnabled;
+            setIsEnabled(newState);
+            localStorage.setItem(DEBUG_GATEWAY_STORAGE_KEY, String(newState));
+          }}
           className={`
             relative w-12 h-7 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-900 focus:ring-white
             ${isEnabled ? 'bg-white' : 'bg-zinc-700'}
@@ -135,7 +165,7 @@ export const DebugServerPanel: React.FC = () => {
             <label className="text-[13px] font-medium text-zinc-300">Endpoint URL</label>
             <div className="w-full bg-zinc-950/50 border border-white/10 rounded-xl px-4 py-3 flex items-center justify-between group/url transition-colors hover:border-white/20">
               <code className="text-zinc-100 font-mono text-[13px] truncate select-all">
-                http://localhost:3000/api/ingest
+                {serverUrl}
               </code>
               <button
                 onClick={handleCopyUrl}

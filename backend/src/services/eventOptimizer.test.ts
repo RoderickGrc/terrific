@@ -50,7 +50,7 @@ describe('eventOptimizer', () => {
                         tagName: 'INPUT',
                         id: 'email',
                         className: 'form-input',
-                        value: 'rodrigo@example.com'
+                        value: 'user@example.com'
                     })
                 }
             ];
@@ -60,7 +60,7 @@ describe('eventOptimizer', () => {
             expect(result).toHaveLength(1);
             expect(result[0].id).toBe('3');
             const details = JSON.parse(result[0].details!);
-            expect(details.value).toBe('rodrigo@example.com');
+            expect(details.value).toBe('user@example.com');
         });
 
         it('should keep separate groups for different inputs', () => {

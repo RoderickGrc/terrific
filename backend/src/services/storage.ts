@@ -1,56 +1,8 @@
 import { promises as fs } from 'fs';
 import { readdirSync } from 'fs';
 import { join } from 'path';
-import { request } from 'http';
 import { config, getSessionDirName } from '../config.js';
 import { Session, QAEvent } from '../types/index.js';
-
-const DEBUG_LOG_PATH = join(process.cwd(), '.cursor', 'debug.log');
-const DEBUG_SERVER_URL = process.env.DEBUG_SERVER_URL || '';
-
-async function debugLog(location: string, message: string, data: any, hypothesisId: string) {
-  const logEntry = {
-    location,
-    message,
-    data,
-    timestamp: Date.now(),
-    sessionId: 'debug-session',
-    runId: 'run2',
-    hypothesisId,
-  };
-
-  // Write to file
-  try {
-    const logLine = JSON.stringify(logEntry) + '\n';
-    await fs.appendFile(DEBUG_LOG_PATH, logLine);
-  } catch {
-    // Ignore file write errors
-  }
-
-  // Send to debug server (using http module for Node.js compatibility)
-  try {
-    const url = new URL(DEBUG_SERVER_URL);
-    const postData = JSON.stringify(logEntry);
-
-    const options = {
-      hostname: url.hostname,
-      port: url.port,
-      path: url.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData),
-      },
-    };
-
-    const req = request(options, () => { });
-    req.on('error', () => { });
-    req.write(postData);
-    req.end();
-  } catch {
-    // Ignore network errors
-  }
-}
 
 export class StorageService {
   private sessionsDir: string;
@@ -58,6 +10,28 @@ export class StorageService {
   constructor() {
     this.sessionsDir = config.sessionsDir;
     this.ensureSessionsDir();
+  }
+
+  /**
+   * Set a custom sessions directory for the next operations.
+   * This allows saving sessions to a different location (e.g., client's working directory).
+   */
+  setSessionsDir(sessionsDir: string): void {
+    this.sessionsDir = sessionsDir;
+  }
+
+  /**
+   * Reset sessions directory to the default config value.
+   */
+  resetSessionsDir(): void {
+    this.sessionsDir = config.sessionsDir;
+  }
+
+  /**
+   * Get the current sessions directory being used.
+   */
+  getSessionsDir(): string {
+    return this.sessionsDir;
   }
 
   private async ensureSessionsDir() {
@@ -68,11 +42,14 @@ export class StorageService {
     }
   }
 
-  async saveSession(session: Session): Promise<string> {
+  async saveSession(session: Session, sessionsDir?: string): Promise<string> {
+    // Use provided sessionsDir or fall back to instance state
+    const targetDir = sessionsDir || this.sessionsDir;
+    
     // Create directory with format: YYYY-MM-DD_HH-MM-SS_UUID
     const createdAt = session.createdAt || new Date(session.startTime).toISOString();
     const sessionDirName = getSessionDirName(session.id, createdAt);
-    const sessionDir = join(this.sessionsDir, sessionDirName);
+    const sessionDir = join(targetDir, sessionDirName);
     await fs.mkdir(sessionDir, { recursive: true });
 
     const metadataPath = join(sessionDir, 'metadata.json');
@@ -90,9 +67,13 @@ export class StorageService {
     );
 
     const eventsPath = join(sessionDir, 'events.json');
+    // Sort events before saving to avoid sorting on every read
+    const sortedEvents = [...session.events].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
     await fs.writeFile(
       eventsPath,
-      JSON.stringify(session.events, null, 2)
+      JSON.stringify(sortedEvents, null, 2)
     );
 
     return sessionDirName;
@@ -100,9 +81,6 @@ export class StorageService {
 
   async getSession(sessionIdOrDirName: string, includeEvents: boolean = true): Promise<Session | null> {
     try {
-      // #region agent log
-      await debugLog('storage.ts:71', 'getSession entry', { sessionIdOrDirName, sessionsDir: this.sessionsDir }, 'A');
-      // #endregion
       // Try to find session directory
       // Format can be: UUID, YYYY-MM-DD_UUID, or YYYY-MM-DD_HH-MM-SS_UUID (full directory name)
       let sessionDir: string | null = null;
@@ -119,13 +97,7 @@ export class StorageService {
           actualDirName = sessionIdOrDirName;
           metadataPath = join(sessionDir, 'metadata.json');
           eventsPath = join(sessionDir, 'events.json');
-          // #region agent log
-          await debugLog('storage.ts:90', 'Found in full dir name', { sessionIdOrDirName, sessionDir }, 'A');
-          // #endregion
         } catch (accessError) {
-          // #region agent log
-          await debugLog('storage.ts:95', 'Full directory name access failed', { sessionIdOrDirName, testDir, error: String(accessError) }, 'B');
-          // #endregion
           // Continue to search by UUID
         }
       }
@@ -139,32 +111,17 @@ export class StorageService {
           actualDirName = sessionIdOrDirName;
           metadataPath = join(sessionDir, 'metadata.json');
           eventsPath = join(sessionDir, 'events.json');
-          // #region agent log
-          await debugLog('storage.ts:108', 'Found in exact UUID dir', { sessionIdOrDirName, sessionDir }, 'A');
-          // #endregion
         } catch {
           // Try to find in date-prefixed directories (ends with _UUID)
-          // #region agent log
-          await debugLog('storage.ts:112', 'Searching date-prefixed dirs', { sessionIdOrDirName, sessionsDir: this.sessionsDir, searchPattern: `_${sessionIdOrDirName}` }, 'B');
-          // #endregion
           const entries = await fs.readdir(this.sessionsDir, { withFileTypes: true });
-          // #region agent log
-          await debugLog('storage.ts:115', 'Read sessions directory', { sessionIdOrDirName, entriesCount: entries.length, entryNames: entries.map(e => e.name) }, 'B');
-          // #endregion
 
           for (const entry of entries) {
             if (entry.isDirectory()) {
-              // #region agent log
-              await debugLog('storage.ts:120', 'Checking directory', { sessionIdOrDirName, entryName: entry.name, endsWithPattern: entry.name.endsWith(`_${sessionIdOrDirName}`) }, 'B');
-              // #endregion
               if (entry.name.endsWith(`_${sessionIdOrDirName}`)) {
                 sessionDir = join(this.sessionsDir, entry.name);
                 actualDirName = entry.name;
                 metadataPath = join(sessionDir, 'metadata.json');
                 eventsPath = join(sessionDir, 'events.json');
-                // #region agent log
-                await debugLog('storage.ts:126', 'Found session directory', { sessionIdOrDirName, entryName: entry.name, sessionDir }, 'B');
-                // #endregion
                 break;
               }
             }
@@ -173,9 +130,6 @@ export class StorageService {
       }
 
       if (!sessionDir || !metadataPath || !eventsPath) {
-        // #region agent log
-        await debugLog('storage.ts:133', 'Session directory not found', { sessionIdOrDirName, sessionsDir: this.sessionsDir, sessionDir }, 'D');
-        // #endregion
         return null;
       }
 
@@ -186,13 +140,8 @@ export class StorageService {
       if (includeEvents) {
         const eventsContent = await fs.readFile(eventsPath, 'utf-8');
         events = JSON.parse(eventsContent);
-        // Sort events chronologically by timestamp
-        events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        // Events are already sorted when saved, no need to sort again
       }
-
-      // #region agent log
-      await debugLog('storage.ts:145', 'Successfully loaded session metadata', { sessionIdOrDirName, sessionId: metadata.id, includeEvents }, 'A');
-      // #endregion
 
       // Find preview image (first PNG) and video file
       let previewImage: string | undefined = undefined;
@@ -227,9 +176,6 @@ export class StorageService {
         sessionDirName: actualDirName || sessionIdOrDirName
       };
     } catch (error) {
-      // #region agent log
-      await debugLog('storage.ts:155', 'Error loading session', { sessionIdOrDirName, error: error instanceof Error ? error.message : String(error), errorStack: error instanceof Error ? error.stack : undefined }, 'C');
-      // #endregion
       return null;
     }
   }

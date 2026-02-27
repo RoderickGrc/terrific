@@ -23,12 +23,37 @@ router.get('/', (req, res) => {
   }
   sessionController.listSessions(req, res);
 });
+
+// Pagination endpoints - must come BEFORE /:id route
+router.get('/:id/events', (req, res) => {
+  if (!sessionController) {
+    res.status(500).json({ error: 'Session controller not initialized' });
+    return;
+  }
+  sessionController.getSessionEventsPaginated(req, res);
+});
+
+router.get('/:id/events/latest', (req, res) => {
+  if (!sessionController) {
+    res.status(500).json({ error: 'Session controller not initialized' });
+    return;
+  }
+  sessionController.getLatestEvents(req, res);
+});
+
 router.get('/:id', (req, res) => {
   if (!sessionController) {
     res.status(500).json({ error: 'Session controller not initialized' });
     return;
   }
   sessionController.getSession(req, res);
+});
+router.post('/:id/start-browser', (req, res) => {
+  if (!sessionController) {
+    res.status(500).json({ error: 'Session controller not initialized' });
+    return;
+  }
+  sessionController.startBrowser(req, res);
 });
 router.post('/:id/stop', (req, res) => {
   if (!sessionController) {
@@ -123,6 +148,15 @@ router.get('/:id/export-context', (req, res) => {
   sessionController.exportSessionContext(req, res);
 });
 
+// Server info endpoint
+router.get('/server-info', (req, res) => {
+  if (!sessionController) {
+    res.status(500).json({ error: 'Session controller not initialized' });
+    return;
+  }
+  sessionController.getServerInfo(req, res);
+});
+
 // Ingest endpoint for external server logs
 router.post('/ingest', (req, res) => {
   if (!sessionController) {
@@ -130,6 +164,24 @@ router.post('/ingest', (req, res) => {
     return;
   }
   sessionController.ingestServerLog(req, res);
+});
+
+// Screen recording upload endpoint (from browser capture)
+router.post('/:id/screen-recording', (req, res) => {
+  if (!sessionController) {
+    res.status(500).json({ error: 'Session controller not initialized' });
+    return;
+  }
+  sessionController.uploadScreenRecording(req, res);
+});
+
+// Post-process video endpoint (fix WebM metadata for seeking)
+router.post('/:id/post-process-video', (req, res) => {
+  if (!sessionController) {
+    res.status(500).json({ error: 'Session controller not initialized' });
+    return;
+  }
+  sessionController.postProcessVideo(req, res);
 });
 
 export default router;

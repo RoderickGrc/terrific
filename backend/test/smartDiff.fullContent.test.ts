@@ -6,15 +6,15 @@ describe('SmartDiff - Full Content Blank Line Filtering', () => {
         // Simula el contenido real del CRAWL a las 00:12.9
         const fullContent = `Te quedan 13 días de tu plan gratuito. [BUTTON: ¡Mejora tu plan ahora!]
 
- [BUTTON: ![Rodrigo logo]()]
+ [BUTTON: ![User logo]()]
 
-Rodrigo
+User
 
 ![Minimizar sidebar]()
 
 ![Logo]()
 
--   Rodrigo
+-   User
 
      [BUTTON: ![Menú]()]
 
@@ -131,15 +131,15 @@ End`;
         // Contenido real del CRAWL a las 00:12.9
         const realCrawl = `Te quedan 13 días de tu plan gratuito. [BUTTON: ¡Mejora tu plan ahora!]
 
- [BUTTON: ![Rodrigo logo]()]
+ [BUTTON: ![User logo]()]
 
-Rodrigo
+User
 
 ![Minimizar sidebar]()
 
 ![Logo]()
 
--   Rodrigo
+-   User
 
      [BUTTON: ![Menú]()]
 

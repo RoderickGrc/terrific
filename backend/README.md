@@ -5,26 +5,29 @@ Backend server for the QA Testing application using Express, Playwright, and Web
 ## Setup
 
 1. Install dependencies:
+
 ```powershell
 npm install
 ```
 
 2. Install Playwright browsers:
+
 ```powershell
 npx playwright install chromium
 ```
 
 3. Start the development server:
+
 ```powershell
 npm run dev
 ```
 
-The server will run on `http://localhost:3001` by default.
+The server will run on `http://localhost:4568` by default.
 
 ## Environment Variables
 
-- `PORT` - Server port (default: 3001)
-- `CORS_ORIGIN` - CORS allowed origin (default: http://localhost:5173)
+- `PORT` - Server port (default: 4568)
+- `CORS_ORIGIN` - CORS allowed origin (default: http://localhost:4567)
 
 ## API Endpoints
 
@@ -39,15 +42,12 @@ The server will run on `http://localhost:3001` by default.
 
 ## WebSocket
 
-Connect to `ws://localhost:3001?sessionId=<sessionId>` to receive real-time events.
+Connect to `ws://localhost:4568?sessionId=<sessionId>` to receive real-time events.
 
 ## Sessions Storage
 
 Sessions are stored in the `sessions/` directory:
+
 - `sessions/{sessionId}/metadata.json` - Session metadata
 - `sessions/{sessionId}/events.json` - Recorded events
 - `sessions/{sessionId}/video.webm` - Video recording (if enabled)
-
-
-
-

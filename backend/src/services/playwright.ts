@@ -1,6 +1,5 @@
 import { chromium, Browser, BrowserContext, Page, devices } from 'playwright';
-import { SessionConfig } from '../types/index.js';
-import { config, getSessionDirName } from '../config.js';
+import { SessionConfig, SessionContext } from '../types/index.js';
 import { join } from 'path';
 import { promises as fs } from 'fs';
 
@@ -9,10 +8,9 @@ export class PlaywrightService {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
 
-  async launchBrowser(sessionConfig: SessionConfig, sessionId: string, createdAt?: string, storageState?: any): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
-    // Determine session directory with format: YYYY-MM-DD_HH-MM-SS_UUID
-    const sessionDirName = getSessionDirName(sessionId, createdAt);
-    const sessionDir = join(config.sessionsDir, sessionDirName);
+  async launchBrowser(sessionConfig: SessionConfig, sessionContext: SessionContext, storageState?: any): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
+    // Use session context for directory path
+    const sessionDir = sessionContext.sessionDir;
 
     // Ensure session directory exists for video recording
     // Always create the directory at session start to ensure it exists for all operations
@@ -86,8 +84,11 @@ export class PlaywrightService {
       contextOptions.viewport = viewport;
     }
 
-    // Add video recording if enabled
-    if (sessionConfig.recordVideo) {
+    // Add video recording if enabled AND recordingMode is 'browser' (or not set for backwards compatibility)
+    const shouldRecordBrowserVideo = sessionConfig.recordVideo &&
+      (!sessionConfig.recordingMode || sessionConfig.recordingMode === 'browser');
+
+    if (shouldRecordBrowserVideo) {
       contextOptions.recordVideo = {
         dir: sessionDir,
         // Only set size if we have a specific viewport (not Dynamic mode)
@@ -107,8 +108,8 @@ export class PlaywrightService {
 
     this.page = await this.context.newPage();
 
-    // Inject cursor trace visualization for video recordings
-    if (sessionConfig.recordVideo) {
+    // Inject cursor trace visualization for browser video recordings only
+    if (shouldRecordBrowserVideo) {
       const cursorTraceScript = `
         (function() {
           // Create cursor trace element
@@ -190,7 +191,42 @@ export class PlaywrightService {
         const url = sessionConfig.initialUrl.trim();
         // Basic URL validation
         if (url.startsWith('http://') || url.startsWith('https://')) {
+          // #region agent log
+          const logData = JSON.stringify({
+            location: 'playwright.ts:196',
+            message: '[ORCHESTRATION] PLAYWRIGHT_NAVIGATE_START',
+            data: { sessionId: sessionContext.sessionId, url, timestamp: Date.now() },
+            timestamp: Date.now(),
+            sessionId: sessionContext.sessionId,
+            runId: 'orchestration',
+            hypothesisId: 'ORCH'
+          });
+          const logPath = join(process.cwd(), '.cursor', 'debug.log');
+          try {
+            await fs.appendFile(logPath, logData + '\n', 'utf8');
+          } catch (e) {
+            // Ignore file write errors
+          }
+          // #endregion
+          
           await this.page.goto(url, { waitUntil: 'domcontentloaded' });
+          
+          // #region agent log
+          const logData2 = JSON.stringify({
+            location: 'playwright.ts:210',
+            message: '[ORCHESTRATION] PLAYWRIGHT_NAVIGATE_COMPLETE',
+            data: { sessionId: sessionContext.sessionId, url, timestamp: Date.now() },
+            timestamp: Date.now(),
+            sessionId: sessionContext.sessionId,
+            runId: 'orchestration',
+            hypothesisId: 'ORCH'
+          });
+          try {
+            await fs.appendFile(logPath, logData2 + '\n', 'utf8');
+          } catch (e) {
+            // Ignore file write errors
+          }
+          // #endregion
         } else {
           console.warn(`Invalid URL format: ${url}. Skipping navigation.`);
         }

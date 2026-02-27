@@ -9,15 +9,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "dotenv": "^16.4.7",
     "lucide-react": "^0.562.0",
     "openai": "^4.104.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-router-dom": "^7.11.0",
-    "dotenv": "^16.4.7"
+    "react-virtualized-auto-sizer": "^2.0.2",
+    "react-window": "^2.2.4"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"

@@ -74,6 +74,7 @@ interface ReplaySidebarProps {
   setShowHidden: (show: boolean) => void;
   onEventsChange: (events: QAEvent[]) => void;
   onEventClick: (event: QAEvent) => void;
+  sessionId?: string;
 }
 
 export const ReplaySidebar: React.FC<ReplaySidebarProps> = ({
@@ -89,7 +90,8 @@ export const ReplaySidebar: React.FC<ReplaySidebarProps> = ({
   showHidden,
   setShowHidden,
   onEventsChange,
-  onEventClick
+  onEventClick,
+  sessionId
 }) => {
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [newFilterProp, setNewFilterProp] = useState<FilterProperty>('type');
@@ -226,8 +228,8 @@ export const ReplaySidebar: React.FC<ReplaySidebarProps> = ({
             <button
               onClick={() => setIsFilterMenuOpen(!isFilterMenuOpen)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${isFilterMenuOpen || activeFilters.length > 0
-                  ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400'
-                  : 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400'
+                : 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
                 }`}
             >
               <ListFilter size={14} />
@@ -439,6 +441,7 @@ export const ReplaySidebar: React.FC<ReplaySidebarProps> = ({
         autoScroll={autoScroll}
         onEventsChange={onEventsChange}
         onEventClick={onEventClick}
+        sessionId={sessionId}
       />
     </div>
   );

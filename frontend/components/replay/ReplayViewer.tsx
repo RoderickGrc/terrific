@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { QAEvent, EventType, DocumentationData, DocStatus } from '../../types';
 import { Button } from '../ui/Button';
+import { buildSessionFileUrl } from '../../src/services/backendUrls';
 
 interface ReplayViewerProps {
     viewMode: 'video' | 'screenshots' | 'analysis';
@@ -19,6 +20,7 @@ interface ReplayViewerProps {
     isPlaying: boolean;
     togglePlay: () => void;
     sessionEvents: QAEvent[];
+    sessionId: string;
 
     // Documentation Props
     docData: DocumentationData;
@@ -51,6 +53,7 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
     isPlaying,
     togglePlay,
     sessionEvents,
+    sessionId,
     docData,
     setDocData,
     isGenerating,
@@ -126,7 +129,29 @@ export const ReplayViewer: React.FC<ReplayViewerProps> = ({
                             <div className="relative w-full h-full max-w-full max-h-full aspect-video">
                                 {screenshots.length > 0 ? (
                                     <>
-                                        <img src={`https://picsum.photos/seed/${screenshots[currentScreenshotIdx]?.id || 'null'}/800/450`} className="w-full h-full object-contain" alt="Screenshot" />
+                                        {currentScreenshotIdx !== -1 && screenshots[currentScreenshotIdx] ? (
+                                            <img
+                                                src={(() => {
+                                                    const screenshot = screenshots[currentScreenshotIdx];
+                                                    try {
+                                                        const details = JSON.parse(screenshot.details || '{}');
+                                                        const filename = details.filename;
+                                                        if (filename) {
+                                                            return buildSessionFileUrl(sessionId, filename);
+                                                        }
+                                                    } catch (e) {
+                                                        console.error('Error parsing screenshot details:', e);
+                                                    }
+                                                    return '';
+                                                })()}
+                                                className="w-full h-full object-contain"
+                                                alt="Screenshot"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full bg-black flex items-center justify-center text-zinc-700">
+                                                <p className="font-mono text-xs uppercase tracking-widest">No screenshot at this time</p>
+                                            </div>
+                                        )}
                                         <button onClick={onPrevScreenshot} className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all z-30 border border-white/10"><ChevronLeft size={20} /></button>
                                         <button onClick={onNextScreenshot} className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all z-30 border border-white/10"><ChevronRight size={20} /></button>
                                     </>
