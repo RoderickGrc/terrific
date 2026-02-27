@@ -1410,7 +1410,7 @@ export class SessionController {
       const { id } = req.params;
       this.configureStorageForRequest(req);
       // #region agent log
-      await fs.appendFile(join(process.cwd(), '.cursor', 'debug.log'), JSON.stringify({location:'session.ts:1201',message:'exportSessionContext called',data:{sessionId:id,eventIdsParam:req.query.eventIds,filtersParam:req.query.filters},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})+'\n');
+      fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dc2656'},body:JSON.stringify({sessionId:'dc2656',runId:'initial',hypothesisId:'A',location:'backend/src/controllers/session.ts:1412',message:'exportSessionContext started',data:{sessionId:id,workspacePresent:!!this.getWorkspaceFromRequest(req),workspaceId:this.getWorkspaceFromRequest(req)?.id || null,eventIdsParam:req.query.eventIds || null,filtersParam:req.query.filters || null},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
       const session = await this.storageService.getSession(id);
       if (!session) {
@@ -1418,7 +1418,7 @@ export class SessionController {
         return;
       }
       // #region agent log
-      await fs.appendFile(join(process.cwd(), '.cursor', 'debug.log'), JSON.stringify({location:'session.ts:1203',message:'session loaded',data:{sessionId:session.id,eventsCount:session.events.length,firstFewEventIds:session.events.slice(0,5).map(e=>e.id)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})+'\n');
+      fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dc2656'},body:JSON.stringify({sessionId:'dc2656',runId:'initial',hypothesisId:'B',location:'backend/src/controllers/session.ts:1418',message:'session loaded for export',data:{sessionId:session.id,eventsCount:Array.isArray(session.events)?session.events.length:0,hasEvents:Array.isArray(session.events),status:session.status},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
 
       const eventIdsParam = req.query.eventIds as string | undefined;
@@ -1427,6 +1427,10 @@ export class SessionController {
         eventIds: eventIdsParam ? eventIdsParam.split(',') : undefined,
         legacyFilters: filtersParam ? filtersParam.split(',') : undefined,
       });
+
+      // #region agent log
+      fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dc2656'},body:JSON.stringify({sessionId:'dc2656',runId:'initial',hypothesisId:'C',location:'backend/src/controllers/session.ts:1427',message:'context rendered',data:{sessionId:session.id,eventsToExportCount:contextResult.eventsToExport.length,filterInfo:contextResult.filterInfo,contentLength:contextResult.content.length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
 
       if (eventIdsParam) {
         const requestedIds = eventIdsParam.split(',').map((eventId) => eventId.trim()).filter(Boolean);
@@ -1455,6 +1459,9 @@ export class SessionController {
       res.send(contextResult.content);
     } catch (error) {
       console.error('Error exporting session context:', error);
+      // #region agent log
+      fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dc2656'},body:JSON.stringify({sessionId:'dc2656',runId:'initial',hypothesisId:'D',location:'backend/src/controllers/session.ts:1457',message:'exportSessionContext error',data:{errorMessage:error instanceof Error?error.message:String(error)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       res.status(500).json({ error: 'Failed to export session context' });
     }
   }
