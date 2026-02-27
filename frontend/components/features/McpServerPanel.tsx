@@ -33,19 +33,22 @@ export const McpServerPanel: React.FC = () => {
     localStorage.setItem(MCP_STORAGE_KEY, String(newState));
   };
 
-  const configForClaudeDesktop = {
+  const configForCursor = {
     mcpServers: {
       terrific: {
-        type: "stdio",
+        type: "local",
+        enabled: true,
         command: "node",
-        args: [serverPath],
-        cwd: "C:\\\\path\\\\to\\\\your\\\\backend"
+        args: [serverPath || "C:\\\\path\\\\to\\\\terrific-backend\\\\dist\\\\mcp\\\\index.js"],
+        env: {
+          CLIENT_CWD: "C:\\\\path\\\\to\\\\your-project"
+        }
       }
     }
   };
 
   const handleCopyConfig = () => {
-    const configStr = JSON.stringify(configForClaudeDesktop, null, 2);
+    const configStr = JSON.stringify(configForCursor, null, 2);
     navigator.clipboard.writeText(configStr);
     setCopiedConfig(true);
     setTimeout(() => setCopiedConfig(false), 2000);
@@ -68,7 +71,7 @@ export const McpServerPanel: React.FC = () => {
           <div>
             <h3 className="text-lg font-bold text-white tracking-tight">MCP Server</h3>
             <p className="text-sm text-zinc-400 mt-1 max-w-[260px] leading-relaxed">
-              Model Context Protocol server for AI-assisted debugging with Claude Desktop and other MCP clients.
+              Model Context Protocol server for AI-assisted debugging from Cursor and other MCP clients.
             </p>
           </div>
         </div>
@@ -118,31 +121,33 @@ export const McpServerPanel: React.FC = () => {
               className="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300 transition-colors w-full group"
             >
               {showInstructions ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              <span className="group-hover:underline decoration-zinc-700 underline-offset-2">Setup Instructions for Claude Desktop</span>
+              <span className="group-hover:underline decoration-zinc-700 underline-offset-2">Quick setup for Cursor (MCP)</span>
             </button>
 
             {showInstructions && (
               <div className="bg-black/20 rounded-xl border border-white/5 p-4 animate-in slide-in-from-top-2 space-y-3">
                 <div className="space-y-1">
-                  <p className="text-[11px] font-medium text-zinc-300">1. Locate your Claude Desktop config:</p>
+                  <p className="text-[11px] font-medium text-zinc-300">1. In your project, create or edit:</p>
                   <code className="text-[10px] font-mono text-zinc-500 block pl-3">
-                    %APPDATA%\Claude\claude_desktop_config.json (Windows)
-                  </code>
-                  <code className="text-[10px] font-mono text-zinc-500 block pl-3">
-                    ~/.config/Claude/claude_desktop_config.json (macOS/Linux)
+                    .cursor/mcp.json
                   </code>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[11px] font-medium text-zinc-300">2. Add this configuration:</p>
+                  <p className="text-[11px] font-medium text-zinc-300">2. Add this configuration (adjust the paths):</p>
                   <div className="relative">
                     <pre className="text-[10px] font-mono text-zinc-400 leading-relaxed bg-zinc-950/50 p-3 rounded-lg overflow-x-auto">
 {`{
   "mcpServers": {
     "terrific": {
-      "type": "stdio",
+      "type": "local",
+      "enabled": true,
       "command": "node",
-      "args": ["\\\\\\\\...\\\\\\dist\\\\\\mcp\\\\\\index.js"],
-      "cwd": "\\\\\\\\...\\\\\\backend"
+      "args": [
+        "C:\\\\path\\\\to\\\\terrific-backend\\\\dist\\\\mcp\\\\index.js"
+      ],
+      "env": {
+        "CLIENT_CWD": "C:\\\\path\\\\to\\\\your-project"
+      }
     }
   }
 }`}
@@ -150,18 +155,7 @@ export const McpServerPanel: React.FC = () => {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[11px] font-medium text-zinc-300">3. Restart Claude Desktop</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[11px] font-medium text-zinc-300">4. Available MCP Tools:</p>
-                  <ul className="text-[10px] font-mono text-zinc-500 pl-3 space-y-0.5">
-                    <li>• live_debug_gateway_health()</li>
-                    <li>• start_fullstack_debug_session()</li>
-                    <li>• start_debug_session()</li>
-                    <li>• stop_session()</li>
-                    <li>• get_session_metadata()</li>
-                    <li>• get_session_logs()</li>
-                  </ul>
+                  <p className="text-[11px] font-medium text-zinc-300">3. Restart Cursor so it picks up the MCP.</p>
                 </div>
               </div>
             )}
@@ -177,14 +171,14 @@ export const McpServerPanel: React.FC = () => {
             >
               <span className="flex items-center gap-2">
                 {copiedConfig ? <CheckCircle2 size={16} /> : <Copy size={16} />}
-                {copiedConfig ? 'Configuration Copied' : 'Copy MCP Configuration'}
+                {copiedConfig ? 'Configuration copied' : 'Copy Cursor MCP config'}
               </span>
               <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded text-zinc-500 group-hover:text-zinc-300">
-                For Claude Desktop
+                For Cursor
               </span>
             </Button>
             <p className="text-[10px] text-zinc-600 mt-2 text-center">
-              Add this to your Claude Desktop config to enable Terrific MCP tools.
+              Add this to .cursor/mcp.json in your project to enable Terrific MCP tools in Cursor.
             </p>
           </div>
 
