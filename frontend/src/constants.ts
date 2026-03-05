@@ -1,5 +1,5 @@
 
-import { Session, BrowserProfile, QAEvent } from './types';
+import { Session, BrowserProfile, QAEvent } from '../types';
 
 // No mock event data; app uses real sessions from the backend
 export const REAL_EVENTS: QAEvent[] = [];

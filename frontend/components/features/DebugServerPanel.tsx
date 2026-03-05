@@ -225,7 +225,7 @@ export const DebugServerPanel: React.FC = () => {
             {/* Start Debug Gateway Session Button */}
             <div className="pt-2">
               <Button
-                variant="default"
+                variant="primary"
                 size="sm"
                 className="w-full py-2.5 px-3"
                 onClick={handleStartDebugSession}

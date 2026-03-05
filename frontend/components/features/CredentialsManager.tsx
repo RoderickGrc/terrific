@@ -190,7 +190,7 @@ export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ is
                                     <div className="flex items-start gap-3">
                                         {/* Status Indicator */}
                                         <div className="mt-1">
-                                            {prof.isVerified ? (
+                                            {prof.hasState ? (
                                                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" title="State Saved" />
                                             ) : (
                                                 <div className="w-2.5 h-2.5 rounded-full bg-zinc-700 border border-zinc-600" title="Empty State" />
@@ -200,7 +200,7 @@ export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ is
                                         <div className="space-y-1">
                                             <div className="flex items-center gap-2">
                                                 <h3 className="font-medium text-zinc-200 text-[15px]">{prof.alias}</h3>
-                                                {prof.isVerified ? (
+                                                {prof.hasState ? (
                                                     <Badge variant="success" className="text-[10px] px-1.5 py-0 h-4">Configured</Badge>
                                                 ) : (
                                                     <Badge variant="neutral" className="text-[10px] px-1.5 py-0 h-4">Empty</Badge>
@@ -209,15 +209,15 @@ export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ is
 
                                             <div className="flex flex-col gap-1 text-xs text-zinc-500">
                                                 <span className="flex items-center gap-1.5 font-mono text-zinc-600">
-                                                    <Globe size={10} /> {prof.targetUrl}
+                                                    <Globe size={10} /> {prof.startUrl}
                                                 </span>
-                                                {(prof.username || prof.email) && (
-                                                    <p className="text-zinc-400 leading-relaxed max-w-md">{prof.username || prof.email}</p>
+                                                {prof.description && (
+                                                    <p className="text-zinc-400 leading-relaxed max-w-md">{prof.description}</p>
                                                 )}
-                                                {prof.isVerified && prof.storageState && (
+                                                {prof.hasState && prof.storageSize && (
                                                     <div className="flex items-center gap-3 mt-1 text-[10px] text-zinc-500">
-                                                        <span>Size: {(new Blob([prof.storageState]).size / 1024).toFixed(1)} KB</span>
-                                                        {prof.createdAt && <span>Created: {new Date(prof.createdAt).toLocaleDateString()}</span>}
+                                                        <span>Size: {prof.storageSize}</span>
+                                                        {prof.lastUpdated && <span>Updated: {new Date(prof.lastUpdated).toLocaleDateString()}</span>}
                                                     </div>
                                                 )}
                                             </div>
@@ -227,7 +227,7 @@ export const BrowserProfileManager: React.FC<BrowserProfileManagerProps> = ({ is
 
                                 <div className="flex items-center justify-between border-t border-zinc-900 pt-3 mt-1">
                                     <div className="flex items-center gap-2">
-                                        {prof.isVerified ? (
+                                        {prof.hasState ? (
                                             <>
                                                 <Button
                                                     size="sm"
