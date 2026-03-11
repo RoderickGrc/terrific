@@ -726,8 +726,6 @@ export async function handleGetSessionLogs(args: unknown): Promise<string> {
 
     await exportResponse.text();
 
-    logger.info('Canonical context generated', { sessionId, contextPath, eventCount: filteredEvents.length });
-
     logger.toolSuccess('get_session_logs');
 
     return JSON.stringify({

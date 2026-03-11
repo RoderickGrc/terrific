@@ -1486,17 +1486,11 @@ export class SessionController {
       if (!this.ensureStorageForRequest(req, res)) {
         return;
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dc2656'},body:JSON.stringify({sessionId:'dc2656',runId:'initial',hypothesisId:'A',location:'backend/src/controllers/session.ts:1412',message:'exportSessionContext started',data:{sessionId:id,workspacePresent:!!this.getWorkspaceFromRequest(req),workspaceId:this.getWorkspaceFromRequest(req)?.id || null,eventIdsParam:req.query.eventIds || null,filtersParam:req.query.filters || null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const session = await this.storageService.getSession(id);
       if (!session) {
         res.status(404).json({ error: 'Session not found' });
         return;
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dc2656'},body:JSON.stringify({sessionId:'dc2656',runId:'initial',hypothesisId:'B',location:'backend/src/controllers/session.ts:1418',message:'session loaded for export',data:{sessionId:session.id,eventsCount:Array.isArray(session.events)?session.events.length:0,hasEvents:Array.isArray(session.events),status:session.status},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
 
       const eventIdsParam = req.query.eventIds as string | undefined;
       const filtersParam = req.query.filters as string | undefined; // Keep for backward compatibility
@@ -1506,15 +1500,14 @@ export class SessionController {
         sessionsDir: this.getSessionsDir(req),
       });
 
-      // #region agent log
-      fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dc2656'},body:JSON.stringify({sessionId:'dc2656',runId:'initial',hypothesisId:'C',location:'backend/src/controllers/session.ts:1427',message:'context rendered',data:{sessionId:session.id,eventsToExportCount:contextResult.eventsToExport.length,filterInfo:contextResult.filterInfo,contentLength:contextResult.content.length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-
       if (eventIdsParam) {
         const requestedIds = eventIdsParam.split(',').map((eventId) => eventId.trim()).filter(Boolean);
         const requestedIdSet = new Set(requestedIds);
         const missingIds = requestedIds.filter((eventId) => !session.events.some((event) => event.id === eventId));
-        await fs.appendFile(join(process.cwd(), '.cursor', 'debug.log'), JSON.stringify({location:'session.ts:1226',message:'events filtered by IDs result',data:{eventsToExportCount:contextResult.eventsToExport.length,requestedCount:requestedIdSet.size,missingIdsCount:missingIds.length,firstFewMissingIds:missingIds.slice(0,5),firstFewMatchedIds:contextResult.eventsToExport.slice(0,5).map(e=>e.id),sampleEventTypes:contextResult.eventsToExport.slice(0,10).map(e=>e.type)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'D'})+'\n');
+        // Intentionally keep this logic for potential future diagnostics, but avoid writing to local debug files
+        // to prevent ENOENT errors when .cursor directory is not present in the backend process cwd.
+        void requestedIdSet;
+        void missingIds;
       }
 
       try {
@@ -1537,9 +1530,6 @@ export class SessionController {
       res.send(contextResult.content);
     } catch (error) {
       console.error('Error exporting session context:', error);
-      // #region agent log
-      fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dc2656'},body:JSON.stringify({sessionId:'dc2656',runId:'initial',hypothesisId:'D',location:'backend/src/controllers/session.ts:1457',message:'exportSessionContext error',data:{errorMessage:error instanceof Error?error.message:String(error)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       res.status(500).json({ error: 'Failed to export session context' });
     }
   }
