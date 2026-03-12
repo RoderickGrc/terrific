@@ -215,13 +215,13 @@ export const ActiveSession: React.FC = () => {
     }
   };
 
-  const handleCrawl = async () => {
+  const handleSnapshot = async () => {
     if (!id) return;
     setIsLoading(true);
     try {
-      await api.captureCrawl(id, workspaceHash);
+      await api.captureSnapshot(id, workspaceHash);
     } catch (error) {
-      console.error('Error capturing crawl:', error);
+      console.error('Error capturing snapshot:', error);
     } finally {
       setIsLoading(false);
     }
@@ -315,16 +315,16 @@ export const ActiveSession: React.FC = () => {
                   className="h-9 px-4 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 flex items-center gap-2 text-xs font-bold uppercase tracking-wider transition-all"
                 >
                   <Camera size={14} />
-                  Snapshot
+                  Screenshot
                 </button>
 
                 <button
-                  onClick={handleCrawl}
+                  onClick={handleSnapshot}
                   disabled={isLoading}
                   className="h-9 px-4 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-700 hover:border-zinc-600 flex items-center gap-2 text-xs font-bold uppercase tracking-wider transition-all"
                 >
                   <Terminal size={14} />
-                  Crawl
+                  Snapshot
                 </button>
               </>
             )}

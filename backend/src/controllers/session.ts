@@ -323,8 +323,8 @@ export class SessionController {
             recordActions: config.recordActions,
             recordConsole: config.recordConsole,
             recordNetwork: config.recordNetwork,
-            crawlOnReload: config.crawlOnReload,
-            crawlOnScreenshot: config.crawlOnScreenshot,
+            snapshotOnReload: config.snapshotOnReload,
+            snapshotOnScreenshot: config.snapshotOnScreenshot,
           }, sessionContext);
           this.recorders.set(sessionId, recorder);
 
@@ -564,8 +564,8 @@ export class SessionController {
           recordActions: config.recordActions,
           recordConsole: config.recordConsole,
           recordNetwork: config.recordNetwork,
-          crawlOnReload: config.crawlOnReload,
-          crawlOnScreenshot: config.crawlOnScreenshot,
+          snapshotOnReload: config.snapshotOnReload,
+          snapshotOnScreenshot: config.snapshotOnScreenshot,
         }, browserSession.sessionContext);
         this.recorders.set(sessionId, recorder);
 
@@ -1231,7 +1231,7 @@ export class SessionController {
     }
   }
 
-  async captureCrawl(req: Request, res: Response): Promise<void> {
+  async captureSnapshot(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
       const browserSession = this.sessions.get(id);
@@ -1239,7 +1239,7 @@ export class SessionController {
 
       // Check if this is a debug_gateway session
       if (browserSession?.config?.sessionType === 'debug_gateway') {
-        res.status(400).json({ error: 'Crawl is not available for debug gateway sessions' });
+        res.status(400).json({ error: 'Snapshot is not available for debug gateway sessions' });
         return;
       }
 
@@ -1248,11 +1248,11 @@ export class SessionController {
         return;
       }
 
-      const event = await recorder.captureCrawl();
+      const event = await recorder.captureSnapshot();
       res.json(event);
     } catch (error) {
-      console.error('Error capturing crawl:', error);
-      res.status(500).json({ error: 'Failed to capture crawl' });
+      console.error('Error capturing snapshot:', error);
+      res.status(500).json({ error: 'Failed to capture snapshot' });
     }
   }
 

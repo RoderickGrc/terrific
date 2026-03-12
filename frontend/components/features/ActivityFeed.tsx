@@ -36,7 +36,7 @@ const getEventIcon = (event: QAEvent) => {
             return <MousePointerClick size={14} className="text-zinc-400" />;
         case EventType.PAGE_RELOAD: return <RefreshCw size={14} className="text-violet-400" />;
         case EventType.SCREENSHOT: return <Camera size={14} className="text-cyan-400" />;
-        case EventType.CRAWL: return <ScanLine size={14} className="text-cyan-400" />;
+        case EventType.SNAPSHOT: return <ScanLine size={14} className="text-cyan-400" />;
         case EventType.BUG: return <Bug size={14} className="text-red-500" />;
         case EventType.FLAG: return <Flag size={14} className="text-amber-500" />;
         case EventType.NOTE: return <MessageSquare size={14} className="text-indigo-400" />;

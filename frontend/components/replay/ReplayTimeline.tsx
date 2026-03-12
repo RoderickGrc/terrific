@@ -42,7 +42,7 @@ const getMarkerIcon = (type: string, message: string) => {
         return <MousePointerClick size={size} className="text-zinc-400" />;
     case 'PAGE_RELOAD': return <RefreshCw size={size} className="text-violet-400" />;
     case 'SCREENSHOT': return <Camera size={size} className="text-cyan-400" />;
-    case 'CRAWL': return <ScanLine size={size} className="text-cyan-400" />;
+    case 'SNAPSHOT': return <ScanLine size={size} className="text-cyan-400" />;
     case 'BUG': return <Bug size={size} className="text-red-500" />;
     case 'FLAG': return <Flag size={size} className="text-amber-500" />;
     case 'NOTE': return <MessageSquare size={size} className="text-indigo-400" />;

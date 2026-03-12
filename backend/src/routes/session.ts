@@ -113,12 +113,12 @@ router.post('/:id/screenshot', (req, res) => {
   }
   sessionController.captureScreenshot(req, res);
 });
-router.post('/:id/crawl', (req, res) => {
+router.post('/:id/snapshot', (req, res) => {
   if (!sessionController) {
     res.status(500).json({ error: 'Session controller not initialized' });
     return;
   }
-  sessionController.captureCrawl(req, res);
+  sessionController.captureSnapshot(req, res);
 });
 router.patch('/:id/name', (req, res) => {
   if (!sessionController) {

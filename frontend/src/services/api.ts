@@ -257,19 +257,19 @@ export const api = {
     return response.json();
   },
 
-  async captureCrawl(sessionId: string, workspaceHash?: string): Promise<QAEvent> {
+  async captureSnapshot(sessionId: string, workspaceHash?: string): Promise<QAEvent> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (workspaceHash) {
       headers['X-Workspace-Hash'] = workspaceHash;
     }
-    const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/crawl`, {
+    const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/snapshot`, {
       method: 'POST',
       headers,
     });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || 'Failed to capture crawl');
+      throw new Error(error.error || 'Failed to capture snapshot');
     }
 
     return response.json();

@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import { readdirSync } from 'fs';
 import { join } from 'path';
 import { config, getSessionDirName } from '../config.js';
-import { Session, QAEvent } from '../types/index.js';
+import { Session, QAEvent, EventType } from '../types/index.js';
 
 export class StorageService {
   private sessionsDir: string;
@@ -140,6 +140,9 @@ export class StorageService {
       if (includeEvents) {
         const eventsContent = await fs.readFile(eventsPath, 'utf-8');
         events = JSON.parse(eventsContent);
+        events = events.map((e: QAEvent) =>
+          (e.type as string) === 'CRAWL' ? { ...e, type: 'SNAPSHOT' as EventType } : e
+        );
         // Events are already sorted when saved, no need to sort again
       }
 

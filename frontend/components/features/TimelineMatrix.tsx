@@ -40,7 +40,7 @@ const getTrackForEvent = (type: EventType): number => {
     case EventType.ACTION: return 3;
     case EventType.PAGE_RELOAD: return 4;
     case EventType.SCREENSHOT:
-    case EventType.CRAWL: return 5;
+    case EventType.SNAPSHOT: return 5;
     case EventType.NOTE:
     case EventType.FLAG:
     case EventType.BUG: return 6;
@@ -188,7 +188,7 @@ export const TimelineMatrix: React.FC<TimelineMatrixProps> = ({
     if (event.type === EventType.PAGE_RELOAD) return <RefreshCw size={12} className={finalIconClass} />;
 
     if (event.type === EventType.SCREENSHOT) return <Camera size={13} className={finalIconClass} />;
-    if (event.type === EventType.CRAWL) return <ScanLine size={13} className={finalIconClass} />;
+    if (event.type === EventType.SNAPSHOT) return <ScanLine size={13} className={finalIconClass} />;
 
     if (event.type === EventType.ACTION) {
       const msg = event.message.toLowerCase();

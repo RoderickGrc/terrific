@@ -51,8 +51,8 @@ export const SessionConfig: React.FC = () => {
         recordConsole: true,
         recordNetwork: true,
         recordVideo: true,
-        crawlReload: false,
-        crawlScreenshot: true
+        snapshotOnReload: false,
+        snapshotOnScreenshot: true
     });
 
     useEffect(() => {

@@ -210,7 +210,7 @@ export const SessionReplay: React.FC = () => {
       const isSvrError = isServerLogError(event);
       if (isNetError || isConError || isSvrError) return { z: 35, bg: 'bg-red-600 border border-black', s: 'circle-lg' };
       if (event.type === EventType.SCREENSHOT) return { z: 32, bg: 'bg-cyan-400 border border-black/20', s: 'circle-lg' };
-      if (event.type === EventType.CRAWL) return { z: 29, bg: 'bg-cyan-600/70', s: 'square' };
+      if (event.type === EventType.SNAPSHOT) return { z: 29, bg: 'bg-cyan-600/70', s: 'square' };
       if (event.type === EventType.PAGE_RELOAD) return { z: 30, bg: 'bg-violet-500', s: 'circle-md' };
       if (event.type === EventType.ACTION && event.message.toLowerCase().includes('click')) return { z: 25, bg: 'bg-zinc-300', s: 'circle-sm' };
       return { z: 10, bg: 'bg-zinc-700', s: 'circle-xs' };

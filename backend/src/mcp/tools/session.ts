@@ -135,8 +135,8 @@ interface SessionResponse {
  * MCP-specific config:
  * - recordVideo: false (NO video recording from MCP)
  * - recordActions: true (ALWAYS true)
- * - crawlOnScreenshot: false (DISABLED from MCP)
- * - crawlOnReload: false (DISABLED from MCP)
+ * - snapshotOnScreenshot: false (DISABLED from MCP)
+ * - snapshotOnReload: false (DISABLED from MCP)
  */
 export const startFullstackDebugSessionTool = {
   name: 'start_fullstack_debug_session',
@@ -154,7 +154,6 @@ export const startFullstackDebugSessionTool = {
 - The main browser opens with http://localhost:4567/#/session/{id} (for user viewing)
 - Actions are always recorded (recordActions: true)
 - Video recording is DISABLED (recordVideo: false)
-- Crawling is DISABLED (crawlOnScreenshot: false, crawlOnReload: false)
 - Logs sent to /api/sessions/ingest are automatically tied to this session
 
 **Parameters:**
@@ -327,7 +326,7 @@ Return:
       },
       filter: {
         type: 'string',
-        description: 'Legacy single event type filter: ACTION, CONSOLE, NETWORK, NOTE, SCREENSHOT, CRAWL, FLAG, BUG, SERVER_LOG (optional)',
+        description: 'Legacy single event type filter: ACTION, CONSOLE, NETWORK, NOTE, SCREENSHOT, SNAPSHOT, FLAG, BUG, SERVER_LOG (optional)',
       },
       search: {
         type: 'string',
@@ -375,8 +374,8 @@ export async function handleStartFullstackDebugSession(args: unknown): Promise<s
         recordActions: true, // ALWAYS true
         recordConsole,
         recordNetwork,
-        crawlOnScreenshot: false, // DISABLED from MCP
-        crawlOnReload: false, // DISABLED from MCP
+        snapshotOnScreenshot: false, // DISABLED from MCP
+        snapshotOnReload: false, // DISABLED from MCP
         recordingMode: 'browser',
         resolution: 'Dynamic', // No forced viewport dimensions
       }),
@@ -409,8 +408,8 @@ export async function handleStartFullstackDebugSession(args: unknown): Promise<s
         recordActions: true,
         recordConsole,
         recordNetwork,
-        crawlOnScreenshot: false,
-        crawlOnReload: false,
+        snapshotOnScreenshot: false,
+        snapshotOnReload: false,
       },
       instructions: [
         '✓ Main browser opened with Terrific session',

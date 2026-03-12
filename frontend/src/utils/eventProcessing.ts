@@ -23,7 +23,7 @@ const getTrackForEvent = (type: EventType): number => {
         case EventType.ACTION: return 3;
         case EventType.PAGE_RELOAD: return 4;
         case EventType.SCREENSHOT:
-        case EventType.CRAWL: return 5;
+        case EventType.SNAPSHOT: return 5;
         case EventType.NOTE:
         case EventType.FLAG:
         case EventType.BUG: return 6;

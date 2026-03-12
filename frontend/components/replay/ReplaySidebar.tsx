@@ -51,7 +51,7 @@ const getTypeIcon = (type: string) => {
     case EventType.ACTION: return <MousePointerClick size={12} className="text-zinc-400" />;
     case EventType.PAGE_RELOAD: return <RefreshCw size={12} className="text-violet-400" />;
     case EventType.SCREENSHOT: return <Camera size={12} className="text-cyan-400" />;
-    case EventType.CRAWL: return <ScanLine size={12} className="text-cyan-400" />;
+    case EventType.SNAPSHOT: return <ScanLine size={12} className="text-cyan-400" />;
     case EventType.BUG: return <Bug size={12} className="text-red-500" />;
     case EventType.FLAG: return <Flag size={12} className="text-amber-500" />;
     case EventType.NOTE: return <MessageSquare size={12} className="text-indigo-400" />;

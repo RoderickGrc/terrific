@@ -159,8 +159,8 @@ describe('SmartDiff', () => {
             expect(result.stats.changeRatio).toBe(0);
         });
 
-        it('should return full content for first crawl (empty original)', () => {
-            const text = 'First crawl content';
+        it('should return full content for first snapshot (empty original)', () => {
+            const text = 'First snapshot content';
 
             const result = processSmartDiff('', text);
 
