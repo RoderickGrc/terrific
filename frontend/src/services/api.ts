@@ -4,9 +4,6 @@ import { API_BASE_URL } from './backendUrls';
 export const api = {
   async createSession(config: SessionConfig, workspaceHash?: string): Promise<Session> {
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:8',message:'Creating session with config',data:{API_BASE_URL,config},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (workspaceHash) {
         headers['X-Workspace-Hash'] = workspaceHash;
@@ -25,16 +22,10 @@ export const api = {
         } catch {
           errorMessage = `Server error: ${response.status} ${response.statusText}`;
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:22',message:'createSession response not ok',data:{status:response.status,statusText:response.statusText,errorMessage},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
         throw new Error(errorMessage);
       }
 
       const sessionData = await response.json();
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:27',message:'createSession success',data:{sessionId:sessionData.id,recordingMode:sessionData.config?.recordingMode,recordVideo:sessionData.config?.recordVideo},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
       return sessionData;
     } catch (error) {
       if (error instanceof TypeError && error.message.includes('fetch')) {
@@ -71,9 +62,6 @@ export const api = {
     const url = `${API_BASE_URL}/api/sessions/${sessionId}`;
 
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:40',message:'getSession called',data:{sessionId,url},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'G'})}).catch(()=>{});
-      // #endregion
       const headers: Record<string, string> = {};
       if (workspaceHash) {
         headers['X-Workspace-Hash'] = workspaceHash;
@@ -100,16 +88,10 @@ export const api = {
           // If JSON parsing fails, use status text
           errorMessage = `Server error: ${response.status} ${response.statusText}`;
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:58',message:'getSession response not ok',data:{status:response.status,statusText:response.statusText,errorMessage},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'G'})}).catch(()=>{});
-        // #endregion
         throw new Error(errorMessage);
       }
 
       const data = await response.json();
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:66',message:'getSession success',data:{sessionId:data.id,config:data.config},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'G'})}).catch(()=>{});
-      // #endregion
       return data;
     } catch (error) {
       if (error instanceof TypeError && error.message.includes('fetch')) {
@@ -427,9 +409,6 @@ export const api = {
   },
 
   async exportSessionContext(sessionId: string, eventIds?: string[], workspaceHash?: string): Promise<{ blob: Blob; filename: string }> {
-    // #region agent log
-    fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:360',message:'exportSessionContext called',data:{sessionId,eventIdsCount:eventIds ? eventIds.length : 'undefined',firstFewIds:eventIds ? eventIds.slice(0,5) : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     let url = `${API_BASE_URL}/api/sessions/${sessionId}/export-context`;
 
     // Add event IDs as query params if provided
@@ -437,9 +416,6 @@ export const api = {
       const params = new URLSearchParams();
       params.set('eventIds', eventIds.join(','));
       url += `?${params.toString()}`;
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:366',message:'eventIds added to URL',data:{url,eventIdsParam:params.get('eventIds')?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
     }
 
     const headers: Record<string, string> = {};

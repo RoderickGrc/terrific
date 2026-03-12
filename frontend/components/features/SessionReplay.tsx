@@ -360,10 +360,6 @@ export const SessionReplay: React.FC = () => {
   const handleExportContext = async () => {
     if (!id) return;
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SessionReplay.tsx:345',message:'handleExportContext called',data:{sessionId:id,activeFiltersCount:activeFilters.length,effectiveFiltersCount:effectiveFilters.length,filteredEventsCount:filteredEvents.length,sessionEventsCount:sessionEvents.length,hasORFilter:effectiveFilters.some(f=>f.logic==='OR'),activeFilters:JSON.stringify(activeFilters),effectiveFilters:JSON.stringify(effectiveFilters)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
       // Reload session from backend to ensure we have the latest events (in case some were deleted)
       const latestSession = await api.getSession(id, workspaceHash);
       const sortedLatestEvents = [...latestSession.events].sort((a, b) =>
@@ -373,15 +369,7 @@ export const SessionReplay: React.FC = () => {
       // Recalculate filtered events using the latest session data and current filters
       const latestFilteredEvents = applyFiltersToEvents(sortedLatestEvents, effectiveFilters, !showHidden, searchTerm);
       const filteredEventIds = latestFilteredEvents.map(e => e.id);
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SessionReplay.tsx:365',message:'filteredEventIds calculated after sync',data:{originalFilteredEventsCount:filteredEvents.length,latestFilteredEventsCount:latestFilteredEvents.length,filteredEventIdsCount:filteredEventIds.length,latestSessionEventsCount:latestSession.events.length,firstFewIds:filteredEventIds.slice(0,10),willSendEventIds:filteredEventIds.length < latestSession.events.length,filteredEventTypes:Array.from(new Set(latestFilteredEvents.map(e=>e.type)))},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
-      
       const eventIdsToSend = filteredEventIds.length < latestSession.events.length ? filteredEventIds : undefined;
-      // #region agent log
-      fetch('http://127.0.0.1:7245/ingest/2036a99f-528e-4b2c-ad8b-559edfab1e53',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SessionReplay.tsx:361',message:'eventIdsToSend determined',data:{eventIdsToSend:eventIdsToSend ? eventIdsToSend.length : 'undefined',firstFewIds:eventIdsToSend ? eventIdsToSend.slice(0,10) : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
 
       const { blob, filename } = await api.exportSessionContext(id, eventIdsToSend, workspaceHash);
 

@@ -188,27 +188,6 @@ export class SessionController {
       // Ensure session directory exists immediately
       await fs.mkdir(sessionContext.sessionDir, { recursive: true });
 
-      // #region agent log
-      const logOrchestration = async (event: string, data: any) => {
-        const logData = JSON.stringify({
-          location: 'session.ts:createSession',
-          message: `[ORCHESTRATION] ${event}`,
-          data: { sessionId, timestamp: Date.now(), ...data },
-          timestamp: Date.now(),
-          sessionId: sessionId,
-          runId: 'orchestration',
-          hypothesisId: 'ORCH'
-        });
-        const logPath = join(process.cwd(), '.cursor', 'debug.log');
-        try {
-          await fs.appendFile(logPath, logData + '\n', 'utf8');
-        } catch (e) {
-          // Ignore file write errors
-        }
-      };
-      await logOrchestration('SESSION_CREATE_START', { recordingMode: config.recordingMode, recordVideo: config.recordVideo });
-      // #endregion
-
       const session: Session = {
         id: sessionId,
         name: config.name,
@@ -266,10 +245,6 @@ export class SessionController {
           sessionContext,
         };
         this.sessions.set(sessionId, browserSession);
-
-        // #region agent log
-        await logOrchestration('SESSION_CREATED_WAITING_FOR_RECORDING', { message: 'Browser launch delayed until recording starts' });
-        // #endregion
       } else {
         // Launch browser immediately for browser recording mode
         // Support both credentialId (legacy) and profileId (new) 
@@ -290,19 +265,11 @@ export class SessionController {
             }
           }
 
-          // #region agent log
-          await logOrchestration('PLAYWRIGHT_BROWSER_LAUNCH_START', {});
-          // #endregion
-
           const result = await playwrightService.launchBrowser(config, sessionContext, storageState);
           browser = result.browser;
           context = result.context;
           page = result.page;
           this.playwrightServices.set(sessionId, playwrightService);
-
-          // #region agent log
-          await logOrchestration('PLAYWRIGHT_BROWSER_OPENED', { url: config.initialUrl });
-          // #endregion
         } catch (error) {
           console.error('Error launching browser:', error);
           res.status(500).json({
@@ -315,10 +282,6 @@ export class SessionController {
         // Create event recorder
         let recorder;
         try {
-          // #region agent log
-          await logOrchestration('EVENT_RECORDER_CREATE_START', {});
-          // #endregion
-
           recorder = new EventRecorder(page, {
             recordActions: config.recordActions,
             recordConsole: config.recordConsole,
@@ -327,10 +290,6 @@ export class SessionController {
             snapshotOnScreenshot: config.snapshotOnScreenshot,
           }, sessionContext);
           this.recorders.set(sessionId, recorder);
-
-          // #region agent log
-          await logOrchestration('EVENT_RECORDER_CREATED', {});
-          // #endregion
         } catch (error) {
           console.error('Error setting up event recorder:', error);
           // Continue even if recorder setup fails - browser is still open
@@ -358,33 +317,11 @@ export class SessionController {
         if (recorder) {
           // Remove any existing listeners to prevent duplicates
           recorder.removeAllListeners('event');
-          let firstEventEmitted = false;
           recorder.on('event', async (event) => {
             const bs = this.sessions.get(sessionId);
             if (bs) {
               bs.events.push(event);
             }
-
-            // #region agent log
-            if (!firstEventEmitted) {
-              firstEventEmitted = true;
-              const logData = JSON.stringify({
-                location: 'session.ts:recorder.on',
-                message: '[ORCHESTRATION] FIRST_PLAYWRIGHT_EVENT_RECEIVED',
-                data: { sessionId, eventType: event.type, eventId: event.id, timestamp: Date.now() },
-                timestamp: Date.now(),
-                sessionId: sessionId,
-                runId: 'orchestration',
-                hypothesisId: 'ORCH'
-              });
-              const logPath = join(process.cwd(), '.cursor', 'debug.log');
-              try {
-                await fs.appendFile(logPath, logData + '\n', 'utf8');
-              } catch (e) {
-                // Ignore file write errors
-              }
-            }
-            // #endregion
 
             // Emit to WebSocket if emitter is set
             if (this.eventEmitter) {
@@ -430,23 +367,6 @@ export class SessionController {
       // Check if browser is already started (with more detailed logging)
       if (browserSession.browser) {
         console.log(`[Session] Browser already started for session ${id}, ignoring duplicate start request`);
-        // #region agent log
-        const logData = JSON.stringify({
-          location: 'session.ts:startBrowser',
-          message: '[ORCHESTRATION] START_BROWSER_DUPLICATE_IGNORED',
-          data: { sessionId: id, timestamp: Date.now() },
-          timestamp: Date.now(),
-          sessionId: id,
-          runId: 'orchestration',
-          hypothesisId: 'ORCH'
-        });
-        const logPath = join(process.cwd(), '.cursor', 'debug.log');
-        try {
-          await fs.appendFile(logPath, logData + '\n', 'utf8');
-        } catch (e) {
-          // Ignore file write errors
-        }
-        // #endregion
         res.status(200).json({ message: 'Browser already started' });
         return;
       }
@@ -469,50 +389,11 @@ export class SessionController {
         });
 
         console.log(`[Session] Updated session startTime from ${oldStartTime} to ${recordingStartTime} (diff: ${timeDiff}ms)`);
-
-        // #region agent log
-        const logData = JSON.stringify({
-          location: 'session.ts:startBrowser',
-          message: '[ORCHESTRATION] SESSION_STARTTIME_UPDATED',
-          data: { sessionId: id, oldStartTime, newStartTime: recordingStartTime, timeDiff, adjustedEvents: browserSession.events.length },
-          timestamp: Date.now(),
-          sessionId: id,
-          runId: 'orchestration',
-          hypothesisId: 'ORCH'
-        });
-        const logPath = join(process.cwd(), '.cursor', 'debug.log');
-        try {
-          await fs.appendFile(logPath, logData + '\n', 'utf8');
-        } catch (e) {
-          // Ignore file write errors
-        }
-        // #endregion
       }
 
       const config = browserSession.config;
       const sessionId = browserSession.sessionId;
       const createdAt = browserSession.createdAt || new Date(browserSession.startTime).toISOString();
-
-      // #region agent log
-      const logOrchestration = async (event: string, data: any) => {
-        const logData = JSON.stringify({
-          location: 'session.ts:startBrowser',
-          message: `[ORCHESTRATION] ${event}`,
-          data: { sessionId, timestamp: Date.now(), ...data },
-          timestamp: Date.now(),
-          sessionId: sessionId,
-          runId: 'orchestration',
-          hypothesisId: 'ORCH'
-        });
-        const logPath = join(process.cwd(), '.cursor', 'debug.log');
-        try {
-          await fs.appendFile(logPath, logData + '\n', 'utf8');
-        } catch (e) {
-          // Ignore file write errors
-        }
-      };
-      await logOrchestration('START_BROWSER_CALLED', {});
-      // #endregion
 
       // Support both credentialId (legacy) and profileId (new)
       const credentialId = (config as any).profileId || config.credentialId;
@@ -531,19 +412,11 @@ export class SessionController {
           }
         }
 
-        // #region agent log
-        await logOrchestration('PLAYWRIGHT_BROWSER_LAUNCH_START', {});
-        // #endregion
-
         const result = await playwrightService.launchBrowser(config, browserSession.sessionContext, storageState);
         browser = result.browser;
         context = result.context;
         page = result.page;
         this.playwrightServices.set(sessionId, playwrightService);
-
-        // #region agent log
-        await logOrchestration('PLAYWRIGHT_BROWSER_OPENED', { url: config.initialUrl });
-        // #endregion
       } catch (error) {
         console.error('Error launching browser:', error);
         res.status(500).json({
@@ -556,10 +429,6 @@ export class SessionController {
       // Create event recorder
       let recorder;
       try {
-        // #region agent log
-        await logOrchestration('EVENT_RECORDER_CREATE_START', {});
-        // #endregion
-
         recorder = new EventRecorder(page, {
           recordActions: config.recordActions,
           recordConsole: config.recordConsole,
@@ -568,10 +437,6 @@ export class SessionController {
           snapshotOnScreenshot: config.snapshotOnScreenshot,
         }, browserSession.sessionContext);
         this.recorders.set(sessionId, recorder);
-
-        // #region agent log
-        await logOrchestration('EVENT_RECORDER_CREATED', {});
-        // #endregion
       } catch (error) {
         console.error('Error setting up event recorder:', error);
         // Continue even if recorder setup fails - browser is still open
@@ -585,33 +450,11 @@ export class SessionController {
       // Listen to recorder events and store them + emit via WebSocket
       if (recorder) {
         recorder.removeAllListeners('event');
-        let firstEventEmitted = false;
         recorder.on('event', async (event) => {
           const bs = this.sessions.get(sessionId);
           if (bs) {
             bs.events.push(event);
           }
-
-          // #region agent log
-          if (!firstEventEmitted) {
-            firstEventEmitted = true;
-            const logData = JSON.stringify({
-              location: 'session.ts:startBrowser.recorder.on',
-              message: '[ORCHESTRATION] FIRST_PLAYWRIGHT_EVENT_RECEIVED',
-              data: { sessionId, eventType: event.type, eventId: event.id, timestamp: Date.now() },
-              timestamp: Date.now(),
-              sessionId: sessionId,
-              runId: 'orchestration',
-              hypothesisId: 'ORCH'
-            });
-            const logPath = join(process.cwd(), '.cursor', 'debug.log');
-            try {
-              await fs.appendFile(logPath, logData + '\n', 'utf8');
-            } catch (e) {
-              // Ignore file write errors
-            }
-          }
-          // #endregion
 
           // Emit to WebSocket if emitter is set
           if (this.eventEmitter) {
