@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronLeft, Download } from 'lucide-react';
+import { ChevronLeft, Download, Copy } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { Session } from '../../types';
@@ -9,9 +9,10 @@ interface ReplayHeaderProps {
   onBack: () => void;
   onExportContext?: () => void;
   onDelete?: () => void;
+  onCopyLogs?: () => void;
 }
 
-export const ReplayHeader: React.FC<ReplayHeaderProps> = ({ session, onBack, onExportContext, onDelete }) => {
+export const ReplayHeader: React.FC<ReplayHeaderProps> = ({ session, onBack, onExportContext, onDelete, onCopyLogs }) => {
   return (
     <header className="h-16 border-b border-white/5 bg-zinc-900/80 backdrop-blur-xl flex items-center justify-between px-6 shrink-0 z-40 relative sticky top-0">
       <div className="flex items-center gap-4">
@@ -34,7 +35,10 @@ export const ReplayHeader: React.FC<ReplayHeaderProps> = ({ session, onBack, onE
 
       <div className="flex items-center gap-3">
         <Button variant="outline" size="sm" onClick={onExportContext}>
-          <Download size={14} className="mr-2" /> Context
+          <Download size={14} className="mr-2" /> Download Logs
+        </Button>
+        <Button variant="outline" size="sm" onClick={onCopyLogs}>
+          <Copy size={14} className="mr-2" /> Copy Logs
         </Button>
         <Button variant="danger" size="sm" onClick={onDelete}>Delete</Button>
       </div>

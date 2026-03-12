@@ -386,6 +386,27 @@ export const SessionReplay: React.FC = () => {
     }
   };
 
+  const handleCopyLogs = async () => {
+    if (!id) return;
+    try {
+      const latestSession = await api.getSession(id, workspaceHash);
+      const sortedLatestEvents = [...latestSession.events].sort((a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      const latestFilteredEvents = applyFiltersToEvents(sortedLatestEvents, effectiveFilters, !showHidden, searchTerm);
+      const filteredEventIds = latestFilteredEvents.map(e => e.id);
+      const eventIdsToSend = filteredEventIds.length < latestSession.events.length ? filteredEventIds : undefined;
+
+      const { blob } = await api.exportSessionContext(id, eventIdsToSend, workspaceHash);
+      const text = await blob.text();
+      await navigator.clipboard.writeText(text);
+      window.alert('Logs copied to clipboard.');
+    } catch (error) {
+      console.error('Failed to copy logs to clipboard:', error);
+    }
+  };
+
   const handleDelete = async () => {
     if (!id || !window.confirm("Are you sure you want to delete this session?")) return;
     try {
@@ -405,6 +426,7 @@ export const SessionReplay: React.FC = () => {
         session={session!}
         onBack={() => navigate(getHomePath(workspaceHash))}
         onExportContext={handleExportContext}
+        onCopyLogs={handleCopyLogs}
         onDelete={handleDelete}
       />
       <div className="flex-1 flex overflow-hidden min-h-0">
