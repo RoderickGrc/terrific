@@ -55,6 +55,15 @@ export class WorkspaceRegistry {
     }
   }
 
+  /** Normalize path for comparison (Windows: uppercase drive letter to avoid d: vs D: duplicates) */
+  private normalizePathForComparison(p: string): string {
+    const full = p.endsWith('.terrific') ? p : join(p, '.terrific');
+    if (full.length >= 2 && full[1] === ':') {
+      return full[0].toUpperCase() + ':' + full.slice(2).replace(/\\/g, '/');
+    }
+    return full.replace(/\\/g, '/');
+  }
+
   /** Get or create workspace for a given path */
   async getOrCreateWorkspace(path: string): Promise<Workspace> {
     // Wait for initialization
@@ -67,8 +76,9 @@ export class WorkspaceRegistry {
       ? path
       : join(path, '.terrific');
 
-    // Check if workspace already exists for this path
-    const existing = Object.values(this.workspaces).find(w => w.path === normalizedPath);
+    // Check if workspace already exists for this path (case-insensitive drive letter on Windows)
+    const compareKey = this.normalizePathForComparison(normalizedPath);
+    const existing = Object.values(this.workspaces).find(w => this.normalizePathForComparison(w.path) === compareKey);
     if (existing) {
       existing.lastAccessedAt = new Date().toISOString();
       await this.save();
@@ -102,11 +112,17 @@ export class WorkspaceRegistry {
     return workspace || null;
   }
 
-  /** List all workspaces */
+  /** List all workspaces (deduplicated by normalized path - keeps most recently accessed) */
   listWorkspaces(): Workspace[] {
-    return Object.values(this.workspaces).sort(
-      (a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime()
-    );
+    const seen = new Set<string>();
+    return Object.values(this.workspaces)
+      .sort((a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime())
+      .filter(w => {
+        const key = this.normalizePathForComparison(w.path);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   }
 
   /** Generate random 8-character hash */

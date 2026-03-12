@@ -127,8 +127,16 @@ export const SessionConfig: React.FC = () => {
                     (a, b) => new Date(b.lastAccessedAt).getTime() - new Date(a.lastAccessedAt).getTime()
                 );
 
+                const seenPaths = new Set<string>();
+                const dedupedWorkspaces = sortedWorkspaces.filter((w) => {
+                    const key = normalizePathForComparison(w.path);
+                    if (seenPaths.has(key)) return false;
+                    seenPaths.add(key);
+                    return true;
+                });
+
                 const workspaceCounts = await Promise.all(
-                    sortedWorkspaces.map(async (workspace: WorkspaceSummary) => {
+                    dedupedWorkspaces.map(async (workspace: WorkspaceSummary) => {
                         try {
                             const sessions = await api.listSessions(workspace.id);
                             return {
@@ -215,6 +223,12 @@ export const SessionConfig: React.FC = () => {
         return option.displayName.toLowerCase().includes(q) || option.path.toLowerCase().includes(q);
     });
 
+    const openWorkspaceManager = () => {
+        setWorkspaceOptions([]);
+        setIsLoadingWorkspaces(true);
+        setShowWorkspaceManager(true);
+    };
+
     const openWorkspace = (option: WorkspaceOption) => {
         setShowWorkspaceManager(false);
         setWorkspaceQuery('');
@@ -242,7 +256,7 @@ export const SessionConfig: React.FC = () => {
                             <div className="self-start lg:hidden">
                                 <button
                                     type="button"
-                                    onClick={() => setShowWorkspaceManager(true)}
+                                    onClick={openWorkspaceManager}
                                     className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/60 px-3 py-2 text-[12px] font-medium text-zinc-300 transition-all hover:border-white/25 hover:text-zinc-100"
                                 >
                                     <Folder size={13} />
@@ -411,7 +425,7 @@ export const SessionConfig: React.FC = () => {
                     <div className="flex justify-end items-start min-h-[4.5rem]">
                         <button
                             type="button"
-                            onClick={() => setShowWorkspaceManager(true)}
+                            onClick={openWorkspaceManager}
                             className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/60 px-3 py-2 text-[12px] font-medium text-zinc-300 transition-all hover:border-white/25 hover:text-zinc-100"
                         >
                             <Folder size={13} />
@@ -566,6 +580,14 @@ function getTimeAgo(timestamp: number) {
     interval = seconds / 60;
     if (interval > 1) return Math.floor(interval) + " minutes ago";
     return Math.floor(seconds) + " seconds ago";
+}
+
+function normalizePathForComparison(path: string): string {
+    const normalized = path.replace(/\\/g, '/');
+    if (normalized.length >= 2 && normalized[1] === ':') {
+        return normalized[0].toUpperCase() + ':' + normalized.slice(2);
+    }
+    return normalized;
 }
 
 function getWorkspaceDisplayName(path: string): string {
