@@ -39,3 +39,4 @@ workspaces.json
 
 # Local workspace registry (paths are machine-specific)
 .terrific/
+/.cursor

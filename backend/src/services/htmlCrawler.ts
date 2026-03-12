@@ -105,6 +105,9 @@ export class HtmlCrawler {
      */
     async crawlPage(page: Page): Promise<string> {
         try {
+            // #region agent log
+            const _dbg_t0 = Date.now();
+            // #endregion
             // Get the HTML content from the page (visible only if flag is enabled)
             const htmlContent = await page.evaluate((filterVisible: boolean) => {
                 // @ts-expect-error - Code runs in browser context
@@ -159,12 +162,23 @@ export class HtmlCrawler {
                 return clone.innerHTML;
             }, FILTER_VISIBLE_ONLY);
 
+            // #region agent log
+            const _dbg_t_dom = Date.now() - _dbg_t0;
+            // #endregion
             // Convert to Markdown
             let markdown = this.turndownService.turndown(htmlContent);
-
+            // #region agent log
+            const _dbg_t_td = Date.now() - _dbg_t0 - _dbg_t_dom;
+            const _dbg_blanks_raw = markdown.split('\n').filter(l => l.trim() === '').length;
+            const _dbg_md_raw_len = markdown.length;
+            // #endregion
             // Post-processing cleanup
             markdown = this.cleanMarkdown(markdown);
-
+            // #region agent log
+            const _dbg_t_clean = Date.now() - _dbg_t0 - _dbg_t_dom - _dbg_t_td;
+            const _dbg_blanks_clean = markdown.split('\n').filter(l => l.trim() === '').length;
+            fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'62d663'},body:JSON.stringify({sessionId:'62d663',location:'htmlCrawler.ts:crawlPage',message:'crawl pipeline step sizes and timing',data:{htmlBytes:htmlContent.length,markdownRawChars:_dbg_md_raw_len,markdownCleanChars:markdown.length,blanksRaw:_dbg_blanks_raw,blanksClean:_dbg_blanks_clean,blanksDelta:_dbg_blanks_raw-_dbg_blanks_clean,t_dom_ms:_dbg_t_dom,t_turndown_ms:_dbg_t_td,t_clean_ms:_dbg_t_clean,reductionPct:Math.round((1-markdown.length/_dbg_md_raw_len)*100)},timestamp:Date.now(),hypothesisId:'A-B'})}).catch(()=>{});
+            // #endregion
             return markdown;
         } catch (error) {
             console.error('[HtmlCrawler] Error crawling page:', error);

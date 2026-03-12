@@ -659,7 +659,13 @@ export class EventRecorder extends EventEmitter {
 
   async captureCrawl(): Promise<QAEvent> {
     try {
+      // #region agent log
+      const _dbg_t0_cap = Date.now();
+      // #endregion
       const crawlData = await this.htmlCrawler.crawlPageWithMetadata(this.page);
+      // #region agent log
+      const _dbg_elapsed_cap = Date.now() - _dbg_t0_cap;
+      // #endregion
 
       const crawlId = generateEventId('cr');
 
@@ -677,6 +683,10 @@ export class EventRecorder extends EventEmitter {
           markdown: crawlData.markdown,
         }, null, 2),
       };
+      // #region agent log
+      const _dbg_stored_len = (event.details as string).length;
+      fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'62d663'},body:JSON.stringify({sessionId:'62d663',location:'recorder.ts:captureCrawl',message:'crawl event stored',data:{totalCrawlMs:_dbg_elapsed_cap,markdownChars:crawlData.markdown.length,storedJsonChars:_dbg_stored_len,jsonOverheadPct:Math.round((_dbg_stored_len-crawlData.markdown.length)/crawlData.markdown.length*100),wordCount:crawlData.wordCount},timestamp:Date.now(),hypothesisId:'A-D'})}).catch(()=>{});
+      // #endregion
 
       this.events.push(event);
       this.emit('event', event);

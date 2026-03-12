@@ -396,6 +396,13 @@ export function processSmartDiff(
 
     const finalOriginal = truncateLines(processedOriginal);
     const finalCurrent = truncateLines(processedCurrent);
+    // #region agent log
+    const _dbg_orig_blanks_raw = originalText.split('\n').filter(l => l.trim() === '').length;
+    const _dbg_orig_blanks_proc = finalOriginal.split('\n').filter(l => l.trim() === '').length;
+    const _dbg_curr_blanks_raw = currentText.split('\n').filter(l => l.trim() === '').length;
+    const _dbg_curr_blanks_proc = finalCurrent.split('\n').filter(l => l.trim() === '').length;
+    fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'62d663'},body:JSON.stringify({sessionId:'62d663',location:'smartDiff.ts:preprocessText',message:'blank lines before vs after preprocessing',data:{origBlanksRaw:_dbg_orig_blanks_raw,origBlanksProcessed:_dbg_orig_blanks_proc,origBlanksRemoved:_dbg_orig_blanks_raw-_dbg_orig_blanks_proc,currBlanksRaw:_dbg_curr_blanks_raw,currBlanksProcessed:_dbg_curr_blanks_proc,currBlanksRemoved:_dbg_curr_blanks_raw-_dbg_curr_blanks_proc,origLenRaw:originalText.length,origLenProc:finalOriginal.length,currLenRaw:currentText.length,currLenProc:finalCurrent.length},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
 
     // Optimization: identical content
     if (finalOriginal === finalCurrent) {
@@ -460,6 +467,9 @@ export function processSmartDiff(
     const decision = useDiff ? 'diff' : 'full';
     const payload = useDiff ? diffText : flattenedFullText;
     const savedChars = useDiff ? Math.max(0, fullLength - diffLength) : 0;
+    // #region agent log
+    fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'62d663'},body:JSON.stringify({sessionId:'62d663',location:'smartDiff.ts:processSmartDiff',message:'diff decision',data:{decision,changeRatio:Number(changeRatio.toFixed(3)),changedLines,maxLines,fullLength,diffLength,savedChars,savedPct:fullLength>0?Math.round(savedChars/fullLength*100):0,isMajorChange,threshold:getAdaptiveThreshold(finalCurrent.length)},timestamp:Date.now(),hypothesisId:'C-E'})}).catch(()=>{});
+    // #endregion
 
     return {
         decision,
