@@ -5,7 +5,7 @@ export enum EventType {
   PAGE_RELOAD = 'PAGE_RELOAD',
   NOTE = 'NOTE',
   SCREENSHOT = 'SCREENSHOT',
-  CRAWL = 'CRAWL',
+  SNAPSHOT = 'SNAPSHOT',
   FLAG = 'FLAG',
   BUG = 'BUG',
   SERVER_LOG = 'SERVER_LOG',
@@ -40,8 +40,8 @@ export interface SessionConfig {
   name?: string;
   resolution?: Resolution;
   credentialId?: string;
-  crawlOnReload?: boolean;
-  crawlOnScreenshot?: boolean;
+  snapshotOnReload?: boolean;
+  snapshotOnScreenshot?: boolean;
 }
 
 export interface Session {

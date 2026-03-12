@@ -12,14 +12,14 @@ export class EventRecorder extends EventEmitter {
     recordActions: boolean;
     recordConsole: boolean;
     recordNetwork: boolean;
-    crawlOnReload?: boolean;
-    crawlOnScreenshot?: boolean;
+    snapshotOnReload?: boolean;
+    snapshotOnScreenshot?: boolean;
   };
   private events: QAEvent[] = [];
   private sessionContext: SessionContext;
   private htmlCrawler: HtmlCrawler;
 
-  constructor(page: Page, config: { recordActions: boolean; recordConsole: boolean; recordNetwork: boolean; crawlOnReload?: boolean; crawlOnScreenshot?: boolean }, sessionContext: SessionContext) {
+  constructor(page: Page, config: { recordActions: boolean; recordConsole: boolean; recordNetwork: boolean; snapshotOnReload?: boolean; snapshotOnScreenshot?: boolean }, sessionContext: SessionContext) {
     super();
     this.page = page;
     this.config = config;
@@ -65,12 +65,12 @@ export class EventRecorder extends EventEmitter {
       this.events.push(event);
       this.emit('event', event);
 
-      // Auto-crawl on reload if enabled
-      if (this.config.crawlOnReload) {
+      // Auto-snapshot on reload if enabled
+      if (this.config.snapshotOnReload) {
         try {
-          await this.captureCrawl();
+          await this.captureSnapshot();
         } catch (error) {
-          console.error('[Recorder] Auto-crawl on reload failed:', error);
+          console.error('[Recorder] Auto-snapshot on reload failed:', error);
         }
       }
     });
@@ -633,12 +633,12 @@ export class EventRecorder extends EventEmitter {
       this.events.push(event);
       this.emit('event', event);
 
-      // Auto-crawl on screenshot if enabled
-      if (this.config.crawlOnScreenshot) {
+      // Auto-snapshot on screenshot if enabled
+      if (this.config.snapshotOnScreenshot) {
         try {
-          await this.captureCrawl();
+          await this.captureSnapshot();
         } catch (error) {
-          console.error('[Recorder] Auto-crawl on screenshot failed:', error);
+          console.error('[Recorder] Auto-snapshot on screenshot failed:', error);
         }
       }
 
@@ -657,7 +657,7 @@ export class EventRecorder extends EventEmitter {
     }
   }
 
-  async captureCrawl(): Promise<QAEvent> {
+  async captureSnapshot(): Promise<QAEvent> {
     try {
       const crawlData = await this.htmlCrawler.crawlPageWithMetadata(this.page);
 
@@ -666,8 +666,8 @@ export class EventRecorder extends EventEmitter {
       // Create event with markdown content directly in details
       const event: QAEvent = {
         id: crawlId,
-        type: EventType.CRAWL,
-        message: `Page crawled: ${crawlData.title} (${crawlData.wordCount} words)`,
+        type: EventType.SNAPSHOT,
+        message: `Page snapshot: ${crawlData.title} (${crawlData.wordCount} words)`,
         timestamp: new Date().toISOString(),
         details: JSON.stringify({
           url: crawlData.url,
@@ -684,8 +684,8 @@ export class EventRecorder extends EventEmitter {
     } catch (error) {
       const event: QAEvent = {
         id: generateEventId('cr'),
-        type: EventType.CRAWL,
-        message: 'Crawl failed',
+        type: EventType.SNAPSHOT,
+        message: 'Snapshot failed',
         timestamp: new Date().toISOString(),
         details: String(error),
       };

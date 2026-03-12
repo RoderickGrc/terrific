@@ -562,8 +562,8 @@ export function optimizeEventsForLLM(
 
     const pipelineEvents = correlateNetworkEvents(processedEvents);
 
-    // Track previous crawl for sequential SmartDiff processing
-    let previousCrawlContent: string | null = null;
+    // Track previous snapshot for sequential SmartDiff processing
+    let previousSnapshotContent: string | null = null;
 
     // Map to optimized format
     const optimized: OptimizedEvent[] = pipelineEvents.map((event) => {
@@ -650,19 +650,19 @@ export function optimizeEventsForLLM(
         if (details) {
             const detailStr = typeof details === 'string' ? details : JSON.stringify(details);
             if (detailStr.length > 10) {
-                // CRAWL events: use SmartDiff for intelligent optimization
-                if (evt.type === EventType.CRAWL) {
+                // SNAPSHOT events: use SmartDiff for intelligent optimization
+                if (evt.type === EventType.SNAPSHOT) {
                     const crawlContent = details?.markdown || details;
                     const crawlText = typeof crawlContent === 'string' ? crawlContent : JSON.stringify(crawlContent);
                     const sep = OPTIMIZER_CONFIG.snapshotLineSeparator;
 
-                    if (previousCrawlContent === null) {
+                    if (previousSnapshotContent === null) {
                         // First snapshot: full content with line separator applied
                         optimizedEvt.details = removeNewlines(crawlText, sep);
-                        previousCrawlContent = crawlText;
+                        previousSnapshotContent = crawlText;
                     } else {
                         // Subsequent snapshots: use SmartDiff with structured hunks
-                        const diffResult = processSmartDiff(previousCrawlContent, crawlText, { lineSeparator: sep });
+                        const diffResult = processSmartDiff(previousSnapshotContent, crawlText, { lineSeparator: sep });
 
                         if (diffResult.decision === 'no_change') {
                             optimizedEvt.delta = null;
@@ -674,7 +674,7 @@ export function optimizeEventsForLLM(
                         }
 
                         // Store raw text for accurate next comparison
-                        previousCrawlContent = crawlText;
+                        previousSnapshotContent = crawlText;
                     }
                 } else if (detailStr.length < 200) {
                     optimizedEvt.details = details;
@@ -1069,7 +1069,7 @@ function abbreviateEventType(type: EventType): string {
         [EventType.BUG]: 'BUG',
         [EventType.SCREENSHOT]: 'SHOT',
         [EventType.PAGE_RELOAD]: 'RELOAD',
-        [EventType.CRAWL]: 'CRAWL',
+        [EventType.SNAPSHOT]: 'SNAP',
         [EventType.SERVER_LOG]: 'SVR',
         [EventType.SESSION_STOPPED]: 'STOP',
     };
