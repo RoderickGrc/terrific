@@ -66,12 +66,11 @@ Terms of Service`;
 
                 // Should generate a diff for this realistic scenario
                 expect(result.decision).toBe('diff');
-                expect(result.diffText).toContain('<<<<<<< ON');
-                expect(result.diffText).toContain('=======');
-                expect(result.diffText).toContain('>>>>>>> CHANGED');
+                expect(result.hunks.length).toBeGreaterThan(0);
 
-                // The blank line before the changed button should be preserved
-                expect(result.diffText).toContain('[BUTTON: ![Chat-icon]()]');
+                // The blank line before the changed button should be preserved in hunks
+                const hunkPayload = JSON.stringify(result.hunks);
+                expect(hunkPayload).toContain('[BUTTON: ![Chat-icon]()]');
         });
 
         it('should remove multiple consecutive orphan blank lines', () => {
@@ -133,9 +132,10 @@ End of page`;
                 // The decision depends on content size, but diff should be generated
                 expect(['diff', 'full']).toContain(result.decision);
 
-                // Should contain the change in the diff text
-                expect(result.diffText).toContain('Section 2 Content');
-                expect(result.diffText).toContain('MODIFIED');
+                // Should contain the change in hunks or payload
+                const payloadStr = result.decision === 'diff' ? JSON.stringify(result.hunks) : result.payload;
+                expect(payloadStr).toContain('Section 2 Content');
+                expect(payloadStr).toContain('MODIFIED');
         });
 
         it('should not break when all lines are blank', () => {
@@ -193,8 +193,9 @@ Footer`;
                 expect(['diff', 'full']).toContain(result.decision);
 
                 // Verify the diff contains the actual change
-                expect(result.diffText).toContain('Content Block 1');
-                expect(result.diffText).toContain('UPDATED');
+                const payloadStr = result.decision === 'diff' ? JSON.stringify(result.hunks) : result.payload;
+                expect(payloadStr).toContain('Content Block 1');
+                expect(payloadStr).toContain('UPDATED');
 
                 // The orphan blank line filtering should have been applied
                 expect(result.structuredDiff).toBeDefined();

@@ -176,9 +176,8 @@ describe('SmartDiff', () => {
 
             // Should use diff format for minor change (or full if diff is larger)
             if (result.decision === 'diff') {
-                expect(result.payload).toContain('<<<<<<< ON');
-                expect(result.payload).toContain('=======');
-                expect(result.payload).toContain('>>>>>>> CHANGED');
+                expect(result.hunks.length).toBeGreaterThan(0);
+                expect(result.payload).toBe(JSON.stringify(result.hunks));
             }
             // Either decision is acceptable for this test
             expect(['diff', 'full']).toContain(result.decision);
@@ -202,6 +201,17 @@ describe('SmartDiff', () => {
             const result = processSmartDiff(oldText, newText);
 
             // Should be treated as identical after normalization
+            expect(result.decision).toBe('no_change');
+        });
+
+        it('should treat single and double newlines as equivalent to prevent ghost hunks', () => {
+            // Same semantic content, different newline spacing between renders
+            const oldText = 'Section A\n\nSection B\n\nSection C';
+            const newText = 'Section A\nSection B\nSection C';
+
+            const result = processSmartDiff(oldText, newText);
+
+            // Both normalize to identical content after \n{2,} → \n — must be no_change
             expect(result.decision).toBe('no_change');
         });
 
@@ -245,14 +255,13 @@ describe('SmartDiff', () => {
             const result = processSmartDiff(oldText, newText);
 
             if (result.decision === 'diff') {
-                // Should contain ON-CHANGED markers
-                expect(result.payload).toMatch(/<<<<<<< ON/);
-                expect(result.payload).toMatch(/=======/);
-                expect(result.payload).toMatch(/>>>>>>> CHANGED/);
+                // Should contain structured hunks
+                expect(result.hunks.length).toBeGreaterThan(0);
 
-                // Should contain the changed content
-                expect(result.payload).toContain('Goodbye World');
-                expect(result.payload).toContain('Goodbye Universe');
+                // Should contain the changed content in hunks
+                const payloadStr = JSON.stringify(result.hunks);
+                expect(payloadStr).toContain('Goodbye World');
+                expect(payloadStr).toContain('Goodbye Universe');
             }
         });
 

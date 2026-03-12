@@ -119,10 +119,10 @@ End`;
         const result = processSmartDiff('', content);
         const lines = result.fullText.split('\n');
 
-        // Debe reducir a máximo 1 línea en blanco entre bloques
-        expect(lines).toEqual(['Start', '', 'Middle', '', 'End']);
+        // Normalize 2+ newlines to 1 — no blank lines between blocks
+        expect(lines).toEqual(['Start', 'Middle', 'End']);
 
-        console.log('\n📊 Mixed Blank Lines Test:');
+        console.log('\nMixed Blank Lines Test:');
         console.log(`Input lines: ${content.split('\n').length}`);
         console.log(`Output lines: ${lines.length}`);
     });

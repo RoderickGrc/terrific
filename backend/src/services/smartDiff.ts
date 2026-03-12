@@ -1,11 +1,11 @@
 import * as Diff from 'diff';
-import { DiffLine, SmartDiffResult, SmartDiffOptions, SmartDiffStats } from '../types/smartDiff.types.js';
+import { DiffLine, SmartDiffResult, SmartDiffOptions, SmartDiffStats, SnapshotHunk } from '../types/smartDiff.types.js';
 import { truncateLongLine } from '../utils/textUtils.js';
 
 /**
  * SmartDiff Service
  * Intelligent diff processing for consecutive crawl events
- * Uses ON-CHANGED format for optimal LLM performance
+ * Uses structured Format C hunks for optimal LLM performance
  */
 
 /**
@@ -14,8 +14,8 @@ import { truncateLongLine } from '../utils/textUtils.js';
  * - Truncate long lines (>600 chars)
  */
 function preprocessText(text: string): string {
-    // Normalize newlines (3+ to 2)
-    let processed = text.replace(/\n{3,}/g, '\n\n');
+    // Normalize newlines (2+ to 1) — prevents ghost hunks from spacing differences between renders
+    let processed = text.replace(/\n{2,}/g, '\n');
 
     // Truncate long lines
     const lines = processed.split('\n');
@@ -65,34 +65,27 @@ function removeOrphanBlankLinesFromText(lines: string[]): string[] {
 }
 
 /**
- * Flatten a block of content by removing internal newlines
- * Preserves structure by replacing newlines with spaces
+ * Flatten an array of lines into a single line using the given separator.
+ * When sep is not a space, existing sep characters in content are escaped as \sep.
  */
-function flattenBlock(text: string): string {
-    return text
-        .replace(/\n+/g, ' ')       // Replace all newlines with spaces
-        .replace(/\s{2,}/g, ' ')    // Collapse multiple spaces
-        .trim();                     // Remove leading/trailing whitespace
+function flattenBlockLines(lines: string[], sep: string = ' '): string {
+    const escaped = sep !== ' '
+        ? lines.map(l => l.replace(new RegExp(sep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), `\\${sep}`).trim())
+        : lines.map(l => l.trim());
+    const joined = escaped.filter(l => l.length > 0).join(sep);
+    return sep === ' ' ? joined.replace(/\s{2,}/g, ' ') : joined;
 }
 
 /**
- * Flatten an array of lines into a single line
- * Used for flattening content within ON/CHANGED blocks
+ * Flatten text to a single line using the given separator.
+ * When sep is not a space, existing sep characters in content are escaped first.
  */
-function flattenBlockLines(lines: string[]): string {
-    return lines
-        .map(l => l.trim())         // Trim each line
-        .filter(l => l.length > 0)   // Remove empty lines
-        .join(' ')                   // Join with single space
-        .replace(/\s{2,}/g, ' ');    // Collapse multiple spaces
-}
-
-/**
- * Remove all newlines from text, replacing them with spaces
- * This creates single-line content for more efficient LLM token usage
- */
-function removeNewlines(text: string): string {
-    return text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+export function removeNewlines(text: string, sep: string = ' '): string {
+    if (sep === ' ') {
+        return text.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    }
+    const escaped = text.replace(new RegExp(sep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), `\\${sep}`);
+    return escaped.replace(/\n+/g, sep).trim();
 }
 
 /**
@@ -309,14 +302,17 @@ function removeOrphanBlankLines(
 }
 
 /**
- * Generate ON-CHANGED format diff with flattened block content
- * Research shows 3× better LLM performance vs unified diff
- * Flattens internal newlines within blocks to reduce token usage
+ * Generate structured Format C hunks from a contextual diff.
+ * Three hunk shapes:
+ *   - Replacement: { on, replace_with } — both neutral+removed and neutral+added flattened
+ *   - Insertion:   { near, insert }     — neutral as anchor, only added content
+ *   - Deletion:    { erase }            — only removed content, self-identifying
  */
-function generateSearchReplaceDiff(
-    structuredDiff: (DiffLine | { type: 'gap'; internal?: boolean })[]
-): string {
-    let diffText = '';
+function generateStructuredHunks(
+    structuredDiff: (DiffLine | { type: 'gap'; internal?: boolean })[],
+    sep: string = ' '
+): SnapshotHunk[] {
+    const hunks: SnapshotHunk[] = [];
     let currentHunk: DiffLine[] = [];
 
     const flushHunk = () => {
@@ -331,33 +327,24 @@ function generateSearchReplaceDiff(
             return;
         }
 
-        diffText += '<<<<<<< ON\n';
-
-        // FLATTEN: Collapse ON block content into single line
-        // Include context + removed lines, all flattened
-        const onLines: string[] = [];
-        currentHunk.forEach(line => {
-            if (line.type !== 'added') {
-                onLines.push(line.text);
-            }
-        });
-        const onContent = flattenBlockLines(onLines);
-        diffText += `${onContent}\n`;
-
-        diffText += '=======\n';
-
-        // FLATTEN: Collapse CHANGED block content into single line
-        // Include context + added lines, all flattened
-        const changedLines: string[] = [];
-        currentHunk.forEach(line => {
-            if (line.type !== 'removed') {
-                changedLines.push(line.text);
-            }
-        });
-        const changedContent = flattenBlockLines(changedLines);
-        diffText += `${changedContent}\n`;
-
-        diffText += '>>>>>>> CHANGED\n\n';
+        if (removedLines.length > 0 && addedLines.length > 0) {
+            // Replacement: neutral+removed → on, neutral+added → replace_with
+            hunks.push({
+                on: flattenBlockLines([...neutralLines, ...removedLines].map(l => l.text), sep),
+                replace_with: flattenBlockLines([...neutralLines, ...addedLines].map(l => l.text), sep),
+            });
+        } else if (addedLines.length > 0) {
+            // Insertion: neutral is the positional anchor, insert is only the new content
+            hunks.push({
+                near: flattenBlockLines(neutralLines.map(l => l.text), sep),
+                insert: flattenBlockLines(addedLines.map(l => l.text), sep),
+            });
+        } else {
+            // Deletion: erase is self-identifying — no anchor needed
+            hunks.push({
+                erase: flattenBlockLines(removedLines.map(l => l.text), sep),
+            });
+        }
 
         currentHunk = [];
     };
@@ -372,7 +359,7 @@ function generateSearchReplaceDiff(
 
     flushHunk();
 
-    return diffText.trim();
+    return hunks;
 }
 
 /**
@@ -384,7 +371,7 @@ export function processSmartDiff(
     currentText: string,
     options: SmartDiffOptions = {}
 ): SmartDiffResult {
-    const { contextLines = 2, maxLineLength = 4000 } = options;
+    const { contextLines = 2, maxLineLength = 4000, lineSeparator = ' ' } = options;
 
     // Pre-process both texts
     const processedOriginal = preprocessText(originalText);
@@ -396,13 +383,6 @@ export function processSmartDiff(
 
     const finalOriginal = truncateLines(processedOriginal);
     const finalCurrent = truncateLines(processedCurrent);
-    // #region agent log
-    const _dbg_orig_blanks_raw = originalText.split('\n').filter(l => l.trim() === '').length;
-    const _dbg_orig_blanks_proc = finalOriginal.split('\n').filter(l => l.trim() === '').length;
-    const _dbg_curr_blanks_raw = currentText.split('\n').filter(l => l.trim() === '').length;
-    const _dbg_curr_blanks_proc = finalCurrent.split('\n').filter(l => l.trim() === '').length;
-    fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'62d663'},body:JSON.stringify({sessionId:'62d663',location:'smartDiff.ts:preprocessText',message:'blank lines before vs after preprocessing',data:{origBlanksRaw:_dbg_orig_blanks_raw,origBlanksProcessed:_dbg_orig_blanks_proc,origBlanksRemoved:_dbg_orig_blanks_raw-_dbg_orig_blanks_proc,currBlanksRaw:_dbg_curr_blanks_raw,currBlanksProcessed:_dbg_curr_blanks_proc,currBlanksRemoved:_dbg_curr_blanks_raw-_dbg_curr_blanks_proc,origLenRaw:originalText.length,origLenProc:finalOriginal.length,currLenRaw:currentText.length,currLenProc:finalCurrent.length},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
 
     // Optimization: identical content
     if (finalOriginal === finalCurrent) {
@@ -410,15 +390,16 @@ export function processSmartDiff(
             decision: 'no_change',
             payload: '(NO CHANGES)',
             fullText: finalCurrent,
-            diffText: '(NO CHANGES)',
+            diffText: '',
+            hunks: [],
             stats: {
                 changeRatio: 0,
                 changedLines: 0,
                 maxLines: finalCurrent.split('\n').length,
                 fullLength: finalCurrent.length,
-                diffLength: 12,
+                diffLength: 0,
                 isMajorChange: false,
-                savedChars: Math.max(0, finalCurrent.length - 12)
+                savedChars: finalCurrent.length
             },
             structuredDiff: []
         };
@@ -453,29 +434,27 @@ export function processSmartDiff(
     // Remove orphan blank lines to reduce noise
     const cleanedDiff = removeOrphanBlankLines(structuredDiff);
 
-    const diffText = generateSearchReplaceDiff(cleanedDiff);
+    // Generate structured Format C hunks
+    const hunks = generateStructuredHunks(cleanedDiff, lineSeparator);
 
-    // Decision logic
-    const flattenedFullText = removeNewlines(finalCurrent);
+    // Decision logic: compare real serialized cost of hunks vs flattened full content
+    const flattenedFullText = removeNewlines(finalCurrent, lineSeparator);
     const fullLength = flattenedFullText.length;
-    const diffLength = diffText.length;
+    const diffLength = JSON.stringify(hunks).length;
 
-    // Primary criterion: is diff shorter than full content?
-    // We now compare against the FLATTENED version of full content
-    const useDiff = diffLength < fullLength && diffLength > 0;
+    // Use hunks only if they are genuinely cheaper than full content
+    const useDiff = diffLength < fullLength && hunks.length > 0;
 
     const decision = useDiff ? 'diff' : 'full';
-    const payload = useDiff ? diffText : flattenedFullText;
+    const payload = useDiff ? JSON.stringify(hunks) : flattenedFullText;
     const savedChars = useDiff ? Math.max(0, fullLength - diffLength) : 0;
-    // #region agent log
-    fetch('http://127.0.0.1:7805/ingest/7f52cca2-b399-477a-973a-eb3a1ff61c89',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'62d663'},body:JSON.stringify({sessionId:'62d663',location:'smartDiff.ts:processSmartDiff',message:'diff decision',data:{decision,changeRatio:Number(changeRatio.toFixed(3)),changedLines,maxLines,fullLength,diffLength,savedChars,savedPct:fullLength>0?Math.round(savedChars/fullLength*100):0,isMajorChange,threshold:getAdaptiveThreshold(finalCurrent.length)},timestamp:Date.now(),hypothesisId:'C-E'})}).catch(()=>{});
-    // #endregion
 
     return {
         decision,
         payload,
         fullText: finalCurrent,
-        diffText,
+        diffText: '',
+        hunks,
         stats: {
             changeRatio,
             changedLines,

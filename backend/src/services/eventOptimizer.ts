@@ -1,6 +1,7 @@
 import { encode } from '@toon-format/toon';
 import { QAEvent, EventType } from '../types/index.js';
-import { processSmartDiff } from './smartDiff.js';
+import { SnapshotHunk } from '../types/smartDiff.types.js';
+import { processSmartDiff, removeNewlines } from './smartDiff.js';
 
 /**
  * Configuration flags to control optimization heuristics.
@@ -15,6 +16,7 @@ export const OPTIMIZER_CONFIG = {
     enableToonEncoding: true,
     enableNetworkDeduplication: true,
     enableViteReloadCollapse: true,
+    snapshotLineSeparator: '¶',
 };
 
 interface NetworkMetadata {
@@ -367,6 +369,7 @@ interface OptimizedEvent {
     msg: string;     // Clean message
     val?: string;    // Final value (for grouped inputs)
     details?: any;   // Pruned details if relevant (parsed JSON for natural look)
+    delta?: SnapshotHunk[] | null;  // Snapshot delta hunks (SNAP events only)
     body?: any;      // Processed request body (for NETWORK POST/PUT/PATCH)
     response?: {
         t: string;
@@ -651,17 +654,26 @@ export function optimizeEventsForLLM(
                 if (evt.type === EventType.CRAWL) {
                     const crawlContent = details?.markdown || details;
                     const crawlText = typeof crawlContent === 'string' ? crawlContent : JSON.stringify(crawlContent);
+                    const sep = OPTIMIZER_CONFIG.snapshotLineSeparator;
 
-                    // First crawl: send full content, no diff
                     if (previousCrawlContent === null) {
-                        optimizedEvt.details = crawlText;
+                        // First snapshot: full content with line separator applied
+                        optimizedEvt.details = removeNewlines(crawlText, sep);
                         previousCrawlContent = crawlText;
                     } else {
-                        // Subsequent crawls: use SmartDiff
-                        const diffResult = processSmartDiff(previousCrawlContent, crawlText);
-                        optimizedEvt.details = diffResult.payload;
+                        // Subsequent snapshots: use SmartDiff with structured hunks
+                        const diffResult = processSmartDiff(previousCrawlContent, crawlText, { lineSeparator: sep });
 
-                        // Store for next crawl comparison
+                        if (diffResult.decision === 'no_change') {
+                            optimizedEvt.delta = null;
+                        } else if (diffResult.decision === 'diff') {
+                            optimizedEvt.delta = diffResult.hunks;
+                        } else {
+                            // full: payload already has sep applied
+                            optimizedEvt.details = diffResult.payload;
+                        }
+
+                        // Store raw text for accurate next comparison
                         previousCrawlContent = crawlText;
                     }
                 } else if (detailStr.length < 200) {

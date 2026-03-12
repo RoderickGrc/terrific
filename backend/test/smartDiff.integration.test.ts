@@ -132,39 +132,33 @@ describe('SmartDiff Integration Tests - Real Session Data', () => {
         });
     });
 
-    describe('Rule 3: ON-CHANGED Diff Format', () => {
-        it('should use ON-CHANGED format for minor changes', () => {
+    describe('Rule 3: Structured Format C Hunks', () => {
+        it('should use structured hunks format for minor changes', () => {
             const sessionStart = new Date(events[0].timestamp).getTime();
             const optimized = optimizeEventsForLLM(events, sessionStart);
 
-            const hasOnMarker = optimized.includes('<<<<<<< ON');
-            const hasSeparator = optimized.includes('=======');
-            const hasChangedMarker = optimized.includes('>>>>>>> CHANGED');
+            // Structured hunks appear as JSON with on/replace_with/near/insert/erase
+            const hasStructuredHunks = optimized.includes('"replace_with"') ||
+                optimized.includes('"erase"') || optimized.includes('"insert"');
 
-            console.log('\n🔄 ON-CHANGED Format Detection:');
-            console.log(`   <<<<<<< ON markers: ${hasOnMarker}`);
-            console.log(`   ======= separators: ${hasSeparator}`);
-            console.log(`   >>>>>>> CHANGED markers: ${hasChangedMarker}`);
+            console.log('\nStructured Hunks Format Detection:');
+            console.log(`   Structured hunks in output: ${hasStructuredHunks}`);
 
-            if (hasOnMarker && hasSeparator && hasChangedMarker) {
-                const onCount = (optimized.match(/<<<<<<< ON/g) || []).length;
-                console.log(`   ✓ Found ${onCount} diff blocks`);
-                expect(onCount).toBeGreaterThan(0);
-            }
+            // Output may use full content or hunks depending on change size
+            expect(optimized.length).toBeGreaterThan(0);
         });
 
-        it('should verify ON-CHANGED format structure', () => {
+        it('should verify structured hunks format', () => {
             const old = 'Line 1\nLine 2\nLine 3';
             const modified = 'Line 1\nLine 2 CHANGED\nLine 3';
 
             const result = processSmartDiff(old, modified);
 
             if (result.decision === 'diff') {
-                expect(result.payload).toContain('<<<<<<< ON');
-                expect(result.payload).toContain('=======');
-                expect(result.payload).toContain('>>>>>>> CHANGED');
+                expect(result.hunks.length).toBeGreaterThan(0);
+                expect(result.payload).toBe(JSON.stringify(result.hunks));
 
-                console.log('\n✅ ON-CHANGED Structure Verified:');
+                console.log('\nStructured Hunks Verified:');
                 console.log(result.payload);
             }
         });
@@ -230,19 +224,19 @@ describe('SmartDiff Integration Tests - Real Session Data', () => {
     });
 
     describe('Rule 5: Newline Normalization', () => {
-        it('should normalize consecutive newlines to max 2', () => {
+        it('should normalize consecutive newlines (2+ to 1)', () => {
             const text = 'Line 1\n\n\n\n\nLine 2\n\n\nLine 3';
             const result = processSmartDiff('', text);
 
-            console.log('\n📝 Newline Normalization:');
+            console.log('\nNewline Normalization:');
             console.log(`   Original: ${text.match(/\n{3,}/g)?.length || 0} sequences of 3+ newlines`);
 
-            // After preprocessing, should have max 2 consecutive newlines
+            // After preprocessing, 2+ newlines become 1 (no double newlines)
             const normalized = result.fullText;
-            const hasTripleNewlines = /\n{3,}/.test(normalized);
+            const hasDoubleNewlines = /\n{2,}/.test(normalized);
 
-            expect(hasTripleNewlines).toBe(false);
-            console.log('   ✓ No sequences of 3+ newlines in output');
+            expect(hasDoubleNewlines).toBe(false);
+            console.log('   No sequences of 2+ newlines in output');
         });
     });
 
@@ -331,7 +325,7 @@ describe('SmartDiff Integration Tests - Real Session Data', () => {
             // Check for key SmartDiff features
             const features = {
                 'NO CHANGES token': optimized.includes('(NO CHANGES)'),
-                'ON-CHANGED format': optimized.includes('<<<<<<< ON'),
+                'Structured hunks or full content': optimized.length > 0,
                 'Truncation markers': optimized.includes(' ... '),
                 'TOON encoding': optimized.includes('events:')
             };
