@@ -23,6 +23,7 @@ export const ActiveSession: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [sessionName, setSessionName] = useState('');
   const [showFinishModal, setShowFinishModal] = useState(false);
+  const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
   const [sessionType, setSessionType] = useState<'browser' | 'debug_gateway'>('browser');
   const [recordingMode, setRecordingMode] = useState<'browser' | 'screen'>('browser');
@@ -171,6 +172,36 @@ export const ActiveSession: React.FC = () => {
     }
   }, [wsEvents, id, navigate, workspaceHash]);
 
+  // Warn on page reload or tab close while session is active
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isRecording || sessionType === 'debug_gateway') {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isRecording, sessionType]);
+
+  // Intercept browser back button to show the same exit confirmation
+  useEffect(() => {
+    window.history.pushState(null, '', window.location.href);
+
+    const handlePopState = (event: PopStateEvent) => {
+      window.history.pushState(null, '', window.location.href);
+      setShowExitConfirmModal(true);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
+
   const handlePauseResume = async () => {
     if (!id) return;
     setIsLoading(true);
@@ -258,9 +289,9 @@ export const ActiveSession: React.FC = () => {
         {/* Left: Navigation & Identity */}
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate(getHomePath(workspaceHash))}
+            onClick={() => setShowExitConfirmModal(true)}
             className="p-2 hover:bg-white/10 rounded-lg text-zinc-400 hover:text-white transition-colors"
-            title="Cancel Session & Return Home"
+            title="Leave Session & Return Home"
           >
             <ChevronLeft size={20} />
           </button>
@@ -425,6 +456,40 @@ export const ActiveSession: React.FC = () => {
                   {isFinishing ? 'Processing...' : 'Save & Close'}
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exit Confirmation Modal */}
+      {showExitConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md">
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-8 w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 mb-4 text-white">
+              <AlertCircle size={24} />
+              <h2 className="text-xl font-bold">Leave active session?</h2>
+            </div>
+            <p className="text-[14px] text-zinc-400 mb-6 leading-relaxed">
+              You are about to leave this active session. You may lose any unsaved notes in this window, but the recording will continue in the background until you finish the session.
+            </p>
+
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setShowExitConfirmModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={() => {
+                  setShowExitConfirmModal(false);
+                  navigate(getHomePath(workspaceHash));
+                }}
+              >
+                Leave & Return Home
+              </Button>
             </div>
           </div>
         </div>
