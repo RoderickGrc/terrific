@@ -213,7 +213,7 @@ export const SessionConfig: React.FC = () => {
         setProfileId(id);
         const profile = profiles.find(c => c.id === id);
         if (profile) {
-            setUrl(profile.targetUrl);
+            setUrl(profile.startUrl);
         }
     };
 

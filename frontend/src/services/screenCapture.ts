@@ -24,13 +24,6 @@ export class ScreenCaptureService {
     private uploadRetries: number = 3; // Max retries for upload
 
     /**
-     * Get the actual recording start time
-     */
-    getStartTime(): number {
-        return this.startTime;
-    }
-
-    /**
      * Start screen capture
      * Shows native OS dialog for user to select screen/window
      */
@@ -231,7 +224,7 @@ export class ScreenCaptureService {
     }
 
     /**
-     * Get recording start time
+     * Get the actual recording start time
      */
     getStartTime(): number {
         return this.startTime;

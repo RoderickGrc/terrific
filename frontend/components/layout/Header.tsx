@@ -116,7 +116,7 @@ export const Header: React.FC<HeaderProps> = ({ title = "QA Testing App", descri
         <div className="flex items-center gap-4 flex-shrink-0 ml-4">
           {rightContent}
           <div className="w-px h-6 bg-border-light dark:border-border-dark mx-2" />
-          <Button variant="text" size="icon" onClick={toggleTheme} className="rounded-full" aria-label="Toggle Theme">
+          <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full" aria-label="Toggle Theme">
             {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
           </Button>
         </div>
